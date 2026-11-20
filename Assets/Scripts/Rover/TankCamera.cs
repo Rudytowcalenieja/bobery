@@ -1,127 +1,121 @@
 using UnityEngine;
-using UnityEngine.InputSystem;
 
 namespace Bobery.Rover
 {
     /// <summary>
-    /// World of Tanks–style third-person camera.
-    /// Mouse orbits freely around the target (independent of the hull's rotation),
-    /// scroll wheel zooms, camera pulls in when blocked by terrain/objects.
-    /// Esc frees the cursor, left click locks it again.
+    /// Fixed chase camera: sits behind the target, looking down at a set angle (45° by default),
+    /// and turns with the target's heading. No mouse control.
+    /// Pulls in when terrain/objects block the view.
     /// </summary>
     [DisallowMultipleComponent]
     public class TankCamera : MonoBehaviour
     {
         [Header("Target")]
         public Transform target;
-        [Tooltip("Orbit pivot offset above the target's position.")]
-        public Vector3 pivotOffset = new Vector3(0f, 2f, 0f);
+        [Tooltip("Point the camera looks at, relative to the target (in target's local space, yaw only).")]
+        public Vector3 pivotOffset = new Vector3(0f, 1f, 0f);
 
-        [Header("Orbit")]
-        public float mouseSensitivity = 0.12f;
-        public float minPitch = -10f;
-        public float maxPitch = 60f;
-        public bool invertY = false;
+        [Header("Auto fit")]
+        [Tooltip("On Start, set pivotOffset and distance from the target's visible size (handles any scale).")]
+        public bool autoFit = true;
+        [Tooltip("Camera distance = this × the target's largest dimension.")]
+        public float distanceMultiplier = 2.2f;
+        [Tooltip("Where the camera aims, as a fraction of the target's height (0 = feet, 1 = top).")]
+        [Range(0f, 1.5f)] public float aimHeight = 0.6f;
 
-        [Header("Zoom")]
+        [Header("Placement")]
+        [Tooltip("Distance from the pivot.")]
         public float distance = 10f;
-        public float minDistance = 4f;
-        public float maxDistance = 22f;
-        public float zoomStep = 1.5f;
-        public float zoomSmoothing = 10f;
+        [Tooltip("Downward angle in degrees (0 = level, 90 = straight down).")]
+        [Range(0f, 89f)] public float pitch = 45f;
 
         [Header("Smoothing")]
-        [Tooltip("How quickly the pivot follows the target (higher = snappier).")]
+        [Tooltip("How quickly the camera turns to match the target's heading (higher = snappier).")]
+        public float rotationSmoothing = 6f;
+        [Tooltip("How quickly the camera follows the target's position (higher = snappier).")]
         public float followSmoothing = 15f;
 
         [Header("Collision")]
         public float collisionRadius = 0.3f;
         public LayerMask collisionMask = ~0;
 
-        [Header("Crosshair")]
-        public bool showCrosshair = true;
-
         float _yaw;
-        float _pitch = 15f;
-        float _targetDistance;
-        float _currentDistance;
         Vector3 _pivot;
         readonly RaycastHit[] _hits = new RaycastHit[16];
 
         void Start()
         {
-            _targetDistance = _currentDistance = distance;
-            if (target)
-            {
-                _yaw = target.eulerAngles.y;
-                _pivot = target.position + pivotOffset;
-            }
-            LockCursor(true);
+            if (autoFit) FitToTarget();
+            SnapToTarget();
         }
 
-        void Update()
+        /// <summary>Sets pivotOffset and distance from the target's rendered size.</summary>
+        [ContextMenu("Fit To Target")]
+        public void FitToTarget()
         {
-            var mouse = Mouse.current;
-            var kb = Keyboard.current;
+            if (!target) return;
+            var renderers = target.GetComponentsInChildren<Renderer>();
+            if (renderers.Length == 0) return;
 
-            if (kb != null && kb.escapeKey.wasPressedThisFrame) LockCursor(false);
-            if (mouse != null && mouse.leftButton.wasPressedThisFrame && Cursor.lockState != CursorLockMode.Locked)
-                LockCursor(true);
-
-            if (mouse == null) return;
-
-            if (Cursor.lockState == CursorLockMode.Locked)
+            // Measure in the target's yaw-aligned space so rotation doesn't inflate the size.
+            Quaternion yaw = Quaternion.Euler(0f, target.eulerAngles.y, 0f);
+            Quaternion inv = Quaternion.Inverse(yaw);
+            bool init = false;
+            var b = new Bounds();
+            foreach (var r in renderers)
             {
-                Vector2 delta = mouse.delta.ReadValue() * mouseSensitivity;
-                _yaw += delta.x;
-                _pitch += invertY ? delta.y : -delta.y;
-                _pitch = Mathf.Clamp(_pitch, minPitch, maxPitch);
+                Bounds wb = r.bounds;
+                for (int i = 0; i < 8; i++)
+                {
+                    Vector3 corner = wb.center + Vector3.Scale(wb.extents,
+                        new Vector3((i & 1) == 0 ? -1 : 1, (i & 2) == 0 ? -1 : 1, (i & 4) == 0 ? -1 : 1));
+                    Vector3 p = inv * (corner - target.position);
+                    if (!init) { b = new Bounds(p, Vector3.zero); init = true; }
+                    else b.Encapsulate(p);
+                }
             }
 
-            float scroll = mouse.scroll.ReadValue().y;
-            if (Mathf.Abs(scroll) > 0.01f)
-            {
-                _targetDistance -= Mathf.Sign(scroll) * zoomStep;
-                _targetDistance = Mathf.Clamp(_targetDistance, minDistance, maxDistance);
-            }
+            float size = Mathf.Max(b.size.x, b.size.y, b.size.z);
+            pivotOffset = new Vector3(0f, b.min.y + b.size.y * aimHeight, 0f);
+            distance = size * distanceMultiplier;
+            collisionRadius = Mathf.Max(0.3f, size * 0.03f);
+        }
+
+        /// <summary>Jumps straight to the final position without smoothing.</summary>
+        public void SnapToTarget()
+        {
+            if (!target) return;
+            _yaw = target.eulerAngles.y;
+            _pivot = PivotFor(target);
+            Place(distance);
         }
 
         void LateUpdate()
         {
             if (!target) return;
 
-            Vector3 desiredPivot = target.position + pivotOffset;
-            _pivot = Vector3.Lerp(_pivot, desiredPivot, 1f - Mathf.Exp(-followSmoothing * Time.deltaTime));
+            float dt = Time.deltaTime;
+            _yaw = Mathf.LerpAngle(_yaw, target.eulerAngles.y, 1f - Mathf.Exp(-rotationSmoothing * dt));
+            _pivot = Vector3.Lerp(_pivot, PivotFor(target), 1f - Mathf.Exp(-followSmoothing * dt));
 
-            _currentDistance = Mathf.Lerp(_currentDistance, _targetDistance, 1f - Mathf.Exp(-zoomSmoothing * Time.deltaTime));
-
-            Quaternion rot = Quaternion.Euler(_pitch, _yaw, 0f);
-            Vector3 dir = rot * Vector3.back;
-
-            float dist = _currentDistance;
-            int count = Physics.SphereCastNonAlloc(_pivot, collisionRadius, dir, _hits, dist, collisionMask, QueryTriggerInteraction.Ignore);
+            Vector3 dir = Quaternion.Euler(pitch, _yaw, 0f) * Vector3.back;
+            float dist = distance;
+            int count = Physics.SphereCastNonAlloc(_pivot, collisionRadius, dir, _hits, distance, collisionMask, QueryTriggerInteraction.Ignore);
             for (int i = 0; i < count; i++)
             {
                 if (_hits[i].transform.IsChildOf(target)) continue; // ignore the rover itself
                 dist = Mathf.Min(dist, Mathf.Max(_hits[i].distance, 0.5f));
             }
 
-            transform.SetPositionAndRotation(_pivot + dir * dist, rot);
+            Place(dist);
         }
 
-        static void LockCursor(bool locked)
-        {
-            Cursor.lockState = locked ? CursorLockMode.Locked : CursorLockMode.None;
-            Cursor.visible = !locked;
-        }
+        Vector3 PivotFor(Transform t) => t.position + Quaternion.Euler(0f, t.eulerAngles.y, 0f) * pivotOffset;
 
-        void OnGUI()
+        void Place(float dist)
         {
-            if (!showCrosshair) return;
-            const float size = 6f;
-            var r = new Rect(Screen.width * 0.5f - size * 0.5f, Screen.height * 0.5f - size * 0.5f, size, size);
-            GUI.color = new Color(1f, 1f, 1f, 0.85f);
-            GUI.DrawTexture(r, Texture2D.whiteTexture);
+            Quaternion rot = Quaternion.Euler(pitch, _yaw, 0f);
+            transform.SetPositionAndRotation(_pivot + rot * Vector3.back * dist, rot);
         }
     }
 }

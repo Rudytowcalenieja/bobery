@@ -42,6 +42,8 @@ namespace Bobery.Rover
         public float wheelRadius = 0.4f;
 
         public float CurrentSpeed => _currentSpeed;
+        /// <summary>Current yaw rate in degrees/second (positive = turning right).</summary>
+        public float CurrentTurn => _currentTurn;
         public bool IsGrounded => _grounded;
 
         Rigidbody _rb;
