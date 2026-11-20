@@ -5,7 +5,7 @@ using UnityEngine;
 public class MapManager : MonoBehaviour
 {
     int checkID = 0;
-    List<Enemie>enemies = new List<Enemie>();
+    public List<Enemie>enemies = new List<Enemie>();
     public Vector2 playerPosition = new Vector2(0,0);
 
     private void Start()
