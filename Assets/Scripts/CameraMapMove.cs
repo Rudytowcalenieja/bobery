@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
@@ -11,6 +12,6 @@ public class CameraMapMove : MonoBehaviour
     }
     private void Update()
     {
-        
+        position += move* Time.deltaTime;
     }
 }
