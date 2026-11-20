@@ -79,6 +79,13 @@ namespace Bobery.Rover
         float _waterY;
         readonly RaycastHit[] _hits = new RaycastHit[16];
 
+        // ---- fuel
+        FuelTank _tank;
+        RectTransform _fuelTrack, _fuelFill;
+        Image _fuelFillImg;
+        Text _fuelValue, _fuelInfo, _fuelLabel;
+        float _fuelFlash;
+
         // ---- state
         string _lastState = "";
         float _toastTimer;
@@ -117,11 +124,16 @@ namespace Bobery.Rover
             HideFromMap(rover ? rover.gameObject : null);
 
             if (rover) rover.Arrived += OnArrived;
+            if (rover) _tank = rover.GetComponent<FuelTank>();
+            if (_tank) _tank.RanOut += OnRanOut;
+            RoverHud.Notified += Toast;
         }
 
         void OnDestroy()
         {
             if (rover) rover.Arrived -= OnArrived;
+            if (_tank) _tank.RanOut -= OnRanOut;
+            RoverHud.Notified -= Toast;
             if (_rt) _rt.Release();
             if (_marker) Destroy(_marker.gameObject);
             var main = Camera.main;
@@ -279,10 +291,7 @@ namespace Bobery.Rover
             {
                 if (rover && rover.HasDestination) { rover.Stop(); Toast("Rover stopped"); }
             });
-            AddButton("RESET ZOOM", Pad + bw + gap, y, bw, 46, filled: false, () =>
-            {
-                mapHeight = 50f; Toast("Zoom reset");
-            });
+            AddButton("ENTER ROVER  [E]", Pad + bw + gap, y, bw, 46, filled: false, RoverInterior.Enter);
 
             // ---- Footer (pinned to bottom)
             var footer = NewRect("Footer", _panel);
@@ -296,7 +305,79 @@ namespace Bobery.Rover
             float kx = 0f;
             kx = KeyHint(footer, kx, "LMB", "Go");
             kx = KeyHint(footer, kx, "RMB", "Stop");
-            KeyHint(footer, kx, "WHEEL", "Zoom");
+            kx = KeyHint(footer, kx, "WHEEL", "Zoom");
+            KeyHint(footer, kx, "E", "Enter");
+
+            BuildFuelBlock(inner);
+        }
+
+        /// <summary>Fuel gauge pinned to the bottom-left of the panel, just above the key hints.</summary>
+        void BuildFuelBlock(float inner)
+        {
+            var block = NewRect("Fuel", _panel);
+            block.anchorMin = new Vector2(0, 0); block.anchorMax = new Vector2(0, 0);
+            block.pivot = new Vector2(0, 0);
+            block.anchoredPosition = new Vector2(Pad, Pad + 56);
+            block.sizeDelta = new Vector2(inner, 70);
+
+            _fuelLabel = Label(block, "FUEL", 12, FontStyle.Bold, Dim);
+            TopLeft(_fuelLabel.rectTransform, 0, 0, inner, 16);
+            _fuelValue = Label(block, "", 13, FontStyle.Bold, White, _mono);
+            TopLeft(_fuelValue.rectTransform, 0, -2, inner, 18);
+            _fuelValue.alignment = TextAnchor.UpperRight;
+
+            _fuelTrack = NewRect("Track", block);
+            TopLeft(_fuelTrack, 0, 24, inner, 14);
+            Img(_fuelTrack, Faint);
+            Outline(_fuelTrack, new Color(1, 1, 1, 0.25f), 1);
+            // quarter ticks
+            for (int i = 1; i < 4; i++)
+            {
+                var t = NewRect("Tick", _fuelTrack);
+                t.anchorMin = t.anchorMax = new Vector2(i / 4f, 0.5f);
+                t.sizeDelta = new Vector2(1, 14);
+                Img(t, new Color(0, 0, 0, 0.6f));
+            }
+            _fuelFill = NewRect("Fill", _fuelTrack);
+            _fuelFill.anchorMin = new Vector2(0, 0); _fuelFill.anchorMax = new Vector2(0, 1);
+            _fuelFill.pivot = new Vector2(0, 0.5f);
+            _fuelFill.offsetMin = new Vector2(2, 2); _fuelFill.offsetMax = new Vector2(2, -2);
+            _fuelFillImg = Img(_fuelFill, White);
+            _fuelFill.SetAsFirstSibling(); // under the ticks and the outline
+
+            _fuelInfo = Label(block, "", 12, FontStyle.Normal, Dim, _mono);
+            TopLeft(_fuelInfo.rectTransform, 0, 46, inner, 18);
+        }
+
+        void UpdateFuel()
+        {
+            if (!_fuelTrack) return;
+            if (!_tank)
+            {
+                _fuelValue.text = "—";
+                _fuelInfo.text = "No fuel tank";
+                return;
+            }
+
+            float w = _fuelTrack.rect.width - 4f;
+            _fuelFill.sizeDelta = new Vector2(w * _tank.Fraction, _fuelFill.sizeDelta.y);
+            _fuelValue.text = $"{_tank.Fuel:0.0} / {_tank.capacity:0} L";
+            string range = float.IsInfinity(_tank.Range) ? "∞" : $"{_tank.Range:0} m";
+            _fuelInfo.text = $"RANGE {range}   ·   CARRIED {FuelTank.Reserve:0.#} L";
+
+            // Low fuel: blink. Empty: label says so. Flash after a refused order.
+            _fuelFlash = Mathf.Max(0f, _fuelFlash - Time.deltaTime);
+            float blink = 0.5f + 0.5f * Mathf.Sin(Time.time * 8f);
+            bool warn = _tank.IsLow || _fuelFlash > 0f;
+            _fuelFillImg.color = warn ? new Color(1, 1, 1, Mathf.Lerp(0.35f, 1f, blink)) : White;
+            _fuelLabel.text = _tank.IsEmpty ? "FUEL  —  EMPTY" : _tank.IsLow ? "FUEL  —  LOW" : "FUEL";
+            _fuelLabel.color = warn || _tank.IsEmpty ? White : Dim;
+        }
+
+        void OnRanOut()
+        {
+            _fuelFlash = 3f;
+            if (FuelTank.Reserve > 0f) Toast("Out of fuel. Press E to refuel inside");
         }
 
         void BuildMap(float x, float y, float side)
@@ -452,6 +533,7 @@ namespace Bobery.Rover
             FollowRover();
             UpdateMapOverlay();
             UpdateTelemetry();
+            UpdateFuel();
 
             // Slide-in on start.
             _openT = Mathf.Min(1f, _openT + Time.unscaledDeltaTime / 0.45f);
@@ -467,6 +549,10 @@ namespace Bobery.Rover
 
         void HandleInput()
         {
+            if (GameOverScreen.IsShown) return;
+            var kb = Keyboard.current;
+            if (kb != null && kb.eKey.wasPressedThisFrame) { RoverInterior.Enter(); return; }
+
             var mouse = Mouse.current;
             if (mouse == null) return;
             Vector2 screen = mouse.position.ReadValue();
@@ -510,13 +596,24 @@ namespace Bobery.Rover
             }
             if (!click) return;
 
+            if (_tank && _tank.IsEmpty)
+            {
+                _fuelFlash = 2f;
+                Toast(FuelTank.Reserve > 0f ? "No fuel. Press E to refuel inside" : "No fuel");
+                return;
+            }
             if (!TryMapPoint(screen, out RaycastHit hit, out _)) { Toast("No ground there"); return; }
             if (hit.point.y < _waterY - 0.05f) { Toast("Can't drive into water"); return; }
             if (Flat(rover.transform.position, hit.point) <= rover.arriveDistance) { Toast("Too close to the rover"); return; }
 
             if (!rover.SetDestination(hit.point)) { Toast("No route there"); return; }
             _routeStart = Mathf.Max(0.01f, rover.DistanceToDestination);
-            if (rover.Path.Count > 1) Toast($"Route: {rover.DistanceToDestination:0} m around obstacles");
+            if (_tank && rover.DistanceToDestination > _tank.Range)
+            {
+                _fuelFlash = 2.5f;
+                Toast($"Not enough fuel: route {rover.DistanceToDestination:0} m, range {_tank.Range:0} m");
+            }
+            else if (rover.Path.Count > 1) Toast($"Route: {rover.DistanceToDestination:0} m around obstacles");
         }
 
         /// <summary>Screen point on the map → ground hit (skipping the rover) + local map position.</summary>
@@ -696,7 +793,7 @@ namespace Bobery.Rover
             _progressFill.rectTransform.sizeDelta = new Vector2((panelWidth - Pad * 2f) * prog, 0);
             _progressText.text = has ? $"{prog * 100f:0}%" : "—";
 
-            string state = has ? (speed > 0.3f ? "EN ROUTE" : "TURNING") : "IDLE";
+            string state = _tank && _tank.IsEmpty ? "NO FUEL" : has ? (speed > 0.3f ? "EN ROUTE" : "TURNING") : "IDLE";
             if (state != _lastState) { _stateText.text = state; _lastState = state; }
             float blink = has ? 0.35f + 0.65f * Mathf.Abs(Mathf.Sin(Time.time * 3f)) : 0.45f;
             _stateDot.color = new Color(1, 1, 1, blink);
@@ -791,7 +888,7 @@ namespace Bobery.Rover
             Stretch(k.rectTransform, 0);
             k.alignment = TextAnchor.MiddleCenter;
 
-            float aw = action.Length * 8f + 18f;
+            float aw = action.Length * 7f + 12f;
             var a = Label(parent, action, 12, FontStyle.Normal, Dim);
             var art = a.rectTransform;
             art.anchorMin = art.anchorMax = new Vector2(0, 0);

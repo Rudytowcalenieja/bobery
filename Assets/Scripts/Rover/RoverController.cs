@@ -93,6 +93,7 @@ namespace Bobery.Rover
         public event System.Action Arrived;
 
         Rigidbody _rb;
+        FuelTank _tank;
         RoverAutoFit _fit;
         Bobery.Terrain.TerrainGenerator _terrain;
         float _yaw;
@@ -175,6 +176,10 @@ namespace Bobery.Rover
             _fit = GetComponent<RoverAutoFit>();
             if (!_fit) _fit = gameObject.AddComponent<RoverAutoFit>();
             _terrain = FindAnyObjectByType<Bobery.Terrain.TerrainGenerator>();
+
+            // Fuel: walking burns it in proportion to distance.
+            _tank = GetComponent<FuelTank>();
+            if (!_tank) _tank = gameObject.AddComponent<FuelTank>();
         }
 
         void Update()
@@ -182,6 +187,12 @@ namespace Bobery.Rover
             _throttle = 0f;
             _steer = 0f;
             if (!_hasDestination) return;
+
+            if (_tank && _tank.IsEmpty)
+            {
+                Stop(); // out of fuel: stand still until refuelled
+                return;
+            }
 
             // Advance through waypoints.
             while (_wp < _path.Count - 1 && FlatDistance(transform.position, _path[_wp]) <= waypointRadius) _wp++;
@@ -233,7 +244,11 @@ namespace Bobery.Rover
             Vector3 fwd = yawRot * Vector3.forward;
             Vector3 right = yawRot * Vector3.right;
 
-            Vector3 pos = _rb.position + fwd * (_currentSpeed * dt);
+            // Fuel: burn for the distance about to be walked; if it runs out mid-step, only go as far as it lasts.
+            float step = _currentSpeed * dt;
+            if (_tank && step > 0f) step *= _tank.Burn(step);
+            if (_tank && _tank.IsEmpty) _currentSpeed = 0f;
+            Vector3 pos = _rb.position + fwd * step;
 
             // Four foot points around the body + the centre.
             Vector3 size = _fit && _fit.IsFitted ? _fit.WorldSize : new Vector3(3f, 2f, 4f);
@@ -290,6 +305,7 @@ namespace Bobery.Rover
             _grounded = Physics.Raycast(transform.position + transform.up * 0.1f, -transform.up,
                 groundCheckDistance, groundMask, QueryTriggerInteraction.Ignore);
             if (!_grounded || _rb.isKinematic) return;
+            if (_tank && _currentSpeed > 0f && _tank.Burn(_currentSpeed * Time.fixedDeltaTime) <= 0f) _currentSpeed = 0f;
 
             Vector3 vel = _rb.linearVelocity;
             Vector3 up = transform.up;

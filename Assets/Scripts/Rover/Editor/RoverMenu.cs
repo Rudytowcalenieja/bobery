@@ -124,6 +124,41 @@ namespace Bobery.Rover.EditorTools
             Selection.activeGameObject = panel.gameObject;
         }
 
+        /// <summary>Creates the placeholder rover interior scene (scene #2) and adds it to Build Settings.</summary>
+        [MenuItem("Bobery/Create Rover Interior Scene")]
+        public static void CreateInteriorScene()
+        {
+            string path = RoverInterior.ScenePath;
+            if (System.IO.File.Exists(path))
+            {
+                if (!EditorUtility.DisplayDialog("Rover Interior", $"{path} already exists. Replace it?", "Replace", "Cancel"))
+                    return;
+            }
+            if (!UnityEditor.SceneManagement.EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo()) return;
+
+            var active = UnityEditor.SceneManagement.EditorSceneManager.GetActiveScene().path;
+            var scene = UnityEditor.SceneManagement.EditorSceneManager.NewScene(
+                UnityEditor.SceneManagement.NewSceneSetup.EmptyScene, UnityEditor.SceneManagement.NewSceneMode.Additive);
+            var room = new GameObject("RoverInterior");
+            room.transform.position = new Vector3(0f, -200f, 0f); // far below the map, in case both are visible
+            room.AddComponent<InteriorRoom>();
+            UnityEngine.SceneManagement.SceneManager.MoveGameObjectToScene(room, scene);
+            UnityEditor.SceneManagement.EditorSceneManager.SaveScene(scene, path);
+            UnityEditor.SceneManagement.EditorSceneManager.CloseScene(scene, true);
+
+            AddToBuildSettings(path);
+            if (!string.IsNullOrEmpty(active)) AddToBuildSettings(active);
+            Debug.Log($"[Rover] Created {path} and added it to Build Settings.");
+        }
+
+        static void AddToBuildSettings(string path)
+        {
+            var scenes = EditorBuildSettings.scenes.ToList();
+            if (scenes.Any(s => s.path == path)) return;
+            scenes.Add(new EditorBuildSettingsScene(path, true));
+            EditorBuildSettings.scenes = scenes.ToArray();
+        }
+
         [MenuItem("Bobery/Refit Rover Collider")]
         public static void Refit()
         {
