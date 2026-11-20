@@ -31,8 +31,11 @@ namespace Bobery.Rover
         public static string CostText => $"{CostAmount:0.#} {PlayerInventory.UnitOf(CostItem)} {PlayerInventory.NameOf(CostItem).ToUpperInvariant()}".Replace("  ", " ");
         public static bool CanAfford => PlayerInventory.Get(CostItem) + 0.0001f >= CostAmount;
 
-        public static void Configure(int capacity, string costItem, float costAmount, float radius, float chargePerSecond)
+        public static float Cooldown { get; private set; } = 300f;
+
+        public static void Configure(int capacity, string costItem, float costAmount, float radius, float chargePerSecond, float cooldown)
         {
+            Cooldown = Mathf.Max(0f, cooldown);
             Capacity = Mathf.Max(0, capacity);
             CostItem = string.IsNullOrEmpty(costItem) ? PlayerInventory.Fuel : costItem;
             CostAmount = Mathf.Max(0f, costAmount);
@@ -56,6 +59,7 @@ namespace Bobery.Rover
             beacon = go.AddComponent<Beacon>();
             beacon.radius = Radius;
             beacon.chargePerSecond = ChargePerSecond;
+            beacon.cooldown = Cooldown;
             _deployed.Add(beacon);
             Changed?.Invoke();
             error = null;
@@ -127,6 +131,13 @@ namespace Bobery.Rover
         /// <summary>0..1 while the zone opens after landing.</summary>
         public float ZoneOpen { get; private set; }
         public bool RoverInside { get; private set; }
+
+        [Tooltip("Seconds the beacon needs after a charging session before it can charge again.")]
+        public float cooldown = 300f;
+        public float CooldownLeft { get; private set; }
+        public bool IsCoolingDown => CooldownLeft > 0f;
+        float _delivered;
+        TextMesh _timer;
 
         const float PinDepth = 0.6f;
         const int Rings = 10, Segments = 72;
@@ -214,21 +225,74 @@ namespace Bobery.Rover
             _zone.localScale = _edge.localScale = new Vector3(e, 1f, e);
 
             float breathe = 0.5f + 0.5f * Mathf.Sin(Time.time * 2.2f);
-            SetAlpha(_zoneMat, (0.10f + 0.04f * breathe) * e);
-            SetAlpha(_edgeMat, (0.55f + 0.25f * breathe) * e);
 
             // Charging pulses run outward while the rover is inside.
             bool inside = _rover && FlatDistance(_rover.transform.position) <= radius;
-            if (inside && !RoverInside) RoverHud.Notify(_battery && _battery.Fraction < 0.999f ? "Beacon in range: charging" : "Beacon in range");
+            if (inside && !RoverInside)
+                RoverHud.Notify(IsCoolingDown ? $"Beacon cooling down: {Clock(CooldownLeft)}"
+                              : _battery && _battery.Fraction < 0.999f ? "Beacon in range: charging" : "Beacon in range");
             RoverInside = inside;
-            if (inside && _battery && !RoverInterior.IsInside) _battery.Recharge(chargePerSecond * Time.deltaTime);
 
-            float p = (Time.time * (inside ? 0.8f : 0.35f)) % 1f;
+            // Cooldown: after a charging session the beacon needs time before it can charge again.
+            if (IsCoolingDown)
+            {
+                CooldownLeft = Mathf.Max(0f, CooldownLeft - Time.deltaTime);
+                if (!IsCoolingDown) RoverHud.Notify("Beacon ready");
+            }
+
+            bool charging = false;
+            if (!IsCoolingDown && inside && _battery && !RoverInterior.IsInside && _battery.Fraction < 0.999f)
+            {
+                _delivered += _battery.Recharge(chargePerSecond * Time.deltaTime);
+                charging = true;
+            }
+            // Session over (rover left, or battery full) → start the cooldown.
+            if (!charging && _delivered > 0.01f)
+            {
+                _delivered = 0f;
+                if (cooldown > 0f)
+                {
+                    CooldownLeft = cooldown;
+                    RoverHud.Notify($"Beacon cooling down: {Clock(CooldownLeft)}");
+                }
+            }
+
+            float dim = IsCoolingDown ? 0.35f : 1f;
+            SetAlpha(_zoneMat, (0.10f + 0.04f * breathe) * e * dim);
+            SetAlpha(_edgeMat, (0.55f + 0.25f * breathe) * e * (IsCoolingDown ? 0.5f : 1f));
+
+            float p = (Time.time * (charging ? 0.8f : 0.35f)) % 1f;
             _pulse.localScale = new Vector3(p, 1f, p) * e;
-            SetAlpha(_pulseMat, (inside ? 0.6f : 0.25f) * (1f - p) * e);
+            SetAlpha(_pulseMat, IsCoolingDown ? 0f : (charging ? 0.6f : 0.25f) * (1f - p) * e);
 
-            SetHeadGlow(inside ? 0.7f + 0.3f * Mathf.Sin(Time.time * 10f) : 0.55f + 0.2f * breathe);
-            _head.localRotation = Quaternion.Euler(0f, Time.time * (inside ? 240f : 60f), 0f);
+            SetHeadGlow(IsCoolingDown ? 0.1f : charging ? 0.7f + 0.3f * Mathf.Sin(Time.time * 10f) : 0.55f + 0.2f * breathe);
+            _head.localRotation = Quaternion.Euler(0f, Time.time * (charging ? 240f : IsCoolingDown ? 10f : 60f), 0f);
+
+            UpdateTimerLabel();
+        }
+
+        /// <summary>Countdown floating above the beacon, facing the camera. Hidden when the beacon is ready.</summary>
+        void UpdateTimerLabel()
+        {
+            if (!_timer) return;
+            bool show = IsCoolingDown && (Phase == State.Active);
+            if (_timer.gameObject.activeSelf != show) _timer.gameObject.SetActive(show);
+            if (!show) return;
+            _timer.text = Clock(CooldownLeft);
+            var cam = Camera.main;
+            if (cam)
+            {
+                _timer.transform.rotation = Quaternion.LookRotation(_timer.transform.position - cam.transform.position, Vector3.up);
+                // keep it readable from the far-away chase camera
+                float d = Vector3.Distance(cam.transform.position, _timer.transform.position);
+                _timer.transform.localScale = Vector3.one * Mathf.Clamp(d / 30f, 0.6f, 3f);
+            }
+        }
+
+        public static string Clock(float secs)
+        {
+            int s = Mathf.CeilToInt(secs);
+            return $"{s / 60}:{s % 60:00}";
         }
 
         void UpdateRetracting()
@@ -239,6 +303,7 @@ namespace Bobery.Rover
             SetAlpha(_zoneMat, 0.12f * close);
             SetAlpha(_edgeMat, 0.7f * close);
             SetAlpha(_pulseMat, 0f);
+            if (_timer) _timer.gameObject.SetActive(false);
             _body.localPosition = Vector3.up * Mathf.Lerp(-PinDepth, dropHeight, k * k);
             _body.localRotation = Quaternion.Euler(0f, k * 540f, 0f);
             SetHeadGlow(1f);
@@ -282,6 +347,7 @@ namespace Bobery.Rover
             if (Phase == State.Exploding) return;
             Phase = State.Exploding;
             _t = 0f;
+            if (_timer) _timer.gameObject.SetActive(false);
             Vector3 at = _body.position;
             // The beacon itself becomes debris.
             foreach (Transform part in _body.GetComponentsInChildren<Transform>())
@@ -381,6 +447,21 @@ namespace Bobery.Rover
             _zone = MeshChild("Zone", _zoneMesh, _zoneMat);
             _edge = MeshChild("Edge", _edgeMesh, _edgeMat);
             _pulse = MeshChild("Pulse", _pulseMesh, _pulseMat);
+
+            // ---- cooldown countdown, floating above the head
+            var timerGo = new GameObject("CooldownTimer");
+            timerGo.transform.SetParent(transform, false);
+            timerGo.transform.localPosition = new Vector3(0f, 6.2f, 0f);
+            _timer = timerGo.AddComponent<TextMesh>();
+            _timer.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            timerGo.GetComponent<MeshRenderer>().sharedMaterial = _timer.font.material;
+            _timer.fontSize = 64;
+            _timer.characterSize = 0.06f;
+            _timer.anchor = TextAnchor.LowerCenter;
+            _timer.alignment = TextAlignment.Center;
+            _timer.fontStyle = FontStyle.Bold;
+            _timer.color = color;
+            timerGo.SetActive(false);
             _zone.localScale = _edge.localScale = _pulse.localScale = new Vector3(0f, 1f, 0f);
         }
 

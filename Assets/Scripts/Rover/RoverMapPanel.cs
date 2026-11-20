@@ -54,6 +54,8 @@ namespace Bobery.Rover
         [Min(1f)] public float beaconRadius = 15f;
         [Tooltip("Battery charge per second while the rover is inside a zone.")]
         [Min(0f)] public float beaconChargePerSecond = 4f;
+        [Tooltip("Seconds a beacon needs after a charging session before it can charge again (300 = 5 min).")]
+        [Min(0f)] public float beaconCooldown = 300f;
 
         // ---- theme
         static readonly Color Black = new Color(0.03f, 0.03f, 0.035f, 0.97f);
@@ -150,7 +152,7 @@ namespace Bobery.Rover
             _hiddenLayer = LayerMask.NameToLayer("TransparentFX");
             if (_hiddenLayer < 0) _hiddenLayer = 1;
 
-            BeaconNetwork.Configure(beaconCount, PlayerInventory.Fuel, beaconCost, beaconRadius, beaconChargePerSecond);
+            BeaconNetwork.Configure(beaconCount, PlayerInventory.Fuel, beaconCost, beaconRadius, beaconChargePerSecond, beaconCooldown);
 
             BuildMapCamera();
             BuildUI();
@@ -556,12 +558,16 @@ namespace Bobery.Rover
                     float open = b.Phase == Beacon.State.Falling ? 0f : 1f - Mathf.Pow(1f - b.ZoneOpen, 3f);
                     m.zone.sizeDelta = Vector2.one * (rad * 2f * open);
                     bool sel = b == _selected, hov = b == _hoverBeacon;
-                    float pulse = b.RoverInside ? 0.5f + 0.5f * Mathf.Sin(Time.time * 6f) : 0f;
-                    m.zoneImg.color = new Color(1, 1, 1, 0.06f + 0.06f * pulse + (sel ? 0.05f : 0f));
-                    m.ringImg.color = new Color(1, 1, 1, sel ? 1f : hov ? 0.85f : 0.55f);
+                    bool cool = b.IsCoolingDown;
+                    float pulse = b.RoverInside && !cool ? 0.5f + 0.5f * Mathf.Sin(Time.time * 6f) : 0f;
+                    m.zoneImg.color = new Color(1, 1, 1, (cool ? 0.03f : 0.06f) + 0.06f * pulse + (sel ? 0.05f : 0f));
+                    m.ringImg.color = new Color(1, 1, 1, sel ? 1f : hov ? 0.85f : cool ? 0.3f : 0.55f);
                     m.icon.sizeDelta = Vector2.one * (sel || hov ? 20f : 16f);
-                    m.iconImg.color = b.Phase == Beacon.State.Falling ? new Color(1, 1, 1, 0.5f + 0.5f * Mathf.Sin(Time.time * 20f)) : White;
-                    m.label.text = sel ? "SELECTED" : b.RoverInside ? "CHARGING" : "";
+                    m.iconImg.color = b.Phase == Beacon.State.Falling ? new Color(1, 1, 1, 0.5f + 0.5f * Mathf.Sin(Time.time * 20f))
+                                    : cool ? new Color(1, 1, 1, 0.45f) : White;
+                    string timer = cool ? Beacon.Clock(b.CooldownLeft) : "";
+                    m.label.text = sel ? (cool ? $"SELECTED · {timer}" : "SELECTED")
+                                 : cool ? timer : b.RoverInside ? "CHARGING" : "";
                 }
             }
             for (int i = shown; i < _beaconMarks.Count; i++) _beaconMarks[i].rt.gameObject.SetActive(false);
