@@ -82,17 +82,53 @@ namespace Bobery.Rover.EditorTools
             Undo.RecordObject(cam.transform, "Move camera");
             tankCam.SnapToTarget();
 
+            AddMapPanel(ctrl, Mathf.Max(b.size.x, b.size.z));
+
             Debug.Log($"[Rover] Created. Collider size: {b.size.x:0.##} x {b.size.y:0.##} x {b.size.z:0.##} m. " +
                       "If it's facing sideways/backwards, rotate the 'Model' child around Y, then Bobery > Refit Rover Collider.", root);
             Selection.activeGameObject = root;
             EditorGUIUtility.PingObject(root);
         }
 
+        [MenuItem("Bobery/Add Map Panel")]
+        public static void AddMapPanelMenu()
+        {
+            var rover = Object.FindAnyObjectByType<RoverController>();
+            if (!rover)
+            {
+                EditorUtility.DisplayDialog("Add Map Panel", "Create a rover first (Bobery > Create Rover).", "OK");
+                return;
+            }
+            var box = rover.GetComponent<BoxCollider>();
+            float footprint = box ? Mathf.Max(box.size.x * rover.transform.lossyScale.x, box.size.z * rover.transform.lossyScale.z) : 3f;
+            AddMapPanel(rover, footprint);
+        }
+
+        /// <summary>Adds (or reuses) the map panel and sizes the rover's arrival distance to its footprint.</summary>
+        static void AddMapPanel(RoverController rover, float footprint)
+        {
+            var panel = Object.FindAnyObjectByType<RoverMapPanel>();
+            if (!panel)
+            {
+                var go = new GameObject("MapPanel");
+                Undo.RegisterCreatedObjectUndo(go, "Add Map Panel");
+                panel = go.AddComponent<RoverMapPanel>();
+            }
+            Undo.RecordObject(panel, "Assign rover");
+            panel.rover = rover;
+            panel.terrain = Object.FindAnyObjectByType<Bobery.Terrain.TerrainGenerator>();
+
+            Undo.RecordObject(rover, "Set arrive distance");
+            rover.arriveDistance = Mathf.Max(1.5f, footprint * 0.75f);
+            rover.waypointRadius = Mathf.Max(1.5f, footprint * 0.5f);
+            Selection.activeGameObject = panel.gameObject;
+        }
+
         [MenuItem("Bobery/Refit Rover Collider")]
         public static void Refit()
         {
             var rover = Selection.activeGameObject ? Selection.activeGameObject.GetComponentInParent<RoverController>() : null;
-            if (!rover) rover = Object.FindFirstObjectByType<RoverController>();
+            if (!rover) rover = Object.FindAnyObjectByType<RoverController>();
             if (!rover)
             {
                 EditorUtility.DisplayDialog("Refit Rover Collider", "No rover found in the scene.", "OK");
@@ -146,6 +182,9 @@ namespace Bobery.Rover.EditorTools
 
             var points = new List<Vector3>();
             var baked = new Mesh();
+            var smrs = temp.GetComponentsInChildren<SkinnedMeshRenderer>();
+            // Per renderer: does the baked mesh need the transform's scale applied? Decided on the first sample.
+            var applyScale = new bool?[smrs.Length];
             try
             {
                 int samples = clip ? AnimationSamples : 1;
@@ -153,12 +192,21 @@ namespace Bobery.Rover.EditorTools
                 {
                     if (clip) clip.SampleAnimation(temp, clip.length * s / Mathf.Max(1, samples - 1));
 
-                    foreach (var smr in temp.GetComponentsInChildren<SkinnedMeshRenderer>())
+                    for (int k = 0; k < smrs.Length; k++)
                     {
+                        var smr = smrs[k];
                         smr.BakeMesh(baked, true);
                         var t = smr.transform;
-                        foreach (var v in baked.vertices)
-                            points.Add(temp.transform.InverseTransformPoint(t.position + t.rotation * v));
+                        var verts = baked.vertices;
+                        if (verts.Length == 0) continue;
+
+                        applyScale[k] ??= NeedsScale(t, verts, smr.bounds.size);
+                        bool scaled = applyScale[k].Value;
+                        foreach (var v in verts)
+                        {
+                            Vector3 world = scaled ? t.TransformPoint(v) : t.position + t.rotation * v;
+                            points.Add(temp.transform.InverseTransformPoint(world));
+                        }
                     }
                     if (s > 0) continue; // static meshes don't animate
                     foreach (var mf in temp.GetComponentsInChildren<MeshFilter>())
@@ -181,6 +229,26 @@ namespace Bobery.Rover.EditorTools
             var bounds = new Bounds(points[0], Vector3.zero);
             foreach (var p in points) bounds.Encapsulate(p);
             return bounds;
+        }
+
+        /// <summary>
+        /// Baked skinned meshes come back either already scaled or in the renderer's unscaled local space,
+        /// depending on Unity version/settings. Pick the interpretation whose size best matches the
+        /// renderer's own world bounds.
+        /// </summary>
+        static bool NeedsScale(Transform t, Vector3[] verts, Vector3 rendererSize)
+        {
+            Bounds a = new Bounds(t.TransformPoint(verts[0]), Vector3.zero);            // with scale
+            Bounds b = new Bounds(t.position + t.rotation * verts[0], Vector3.zero);   // without scale
+            foreach (var v in verts)
+            {
+                a.Encapsulate(t.TransformPoint(v));
+                b.Encapsulate(t.position + t.rotation * v);
+            }
+            float target = Mathf.Max(1e-5f, rendererSize.magnitude);
+            float errA = Mathf.Abs(Mathf.Log(Mathf.Max(1e-5f, a.size.magnitude) / target));
+            float errB = Mathf.Abs(Mathf.Log(Mathf.Max(1e-5f, b.size.magnitude) / target));
+            return errA <= errB;
         }
 
         static Bounds TransformBounds(Bounds src, System.Func<Vector3, Vector3> f)
