@@ -142,14 +142,78 @@ namespace Bobery.Rover.EditorTools
                 UnityEditor.SceneManagement.NewSceneSetup.EmptyScene, UnityEditor.SceneManagement.NewSceneMode.Additive);
             var room = new GameObject("RoverInterior");
             room.transform.position = new Vector3(0f, -200f, 0f); // far below the map, in case both are visible
-            room.AddComponent<InteriorRoom>();
             UnityEngine.SceneManagement.SceneManager.MoveGameObjectToScene(room, scene);
+            BuildInteriorGeometry(room.AddComponent<InteriorRoom>());
             UnityEditor.SceneManagement.EditorSceneManager.SaveScene(scene, path);
             UnityEditor.SceneManagement.EditorSceneManager.CloseScene(scene, true);
 
             AddToBuildSettings(path);
             if (!string.IsNullOrEmpty(active)) AddToBuildSettings(active);
             Debug.Log($"[Rover] Created {path} and added it to Build Settings.");
+        }
+
+        const string InteriorMaterialsFolder = "Assets/Materials/RoverInterior";
+
+        /// <summary>
+        /// Opens the rover interior scene and puts the placeholder cabin into it as real GameObjects,
+        /// so it can be edited by hand. Replaces an existing "Cabin" (asks first).
+        /// </summary>
+        [MenuItem("Bobery/Build Rover Interior Geometry")]
+        public static void BuildInteriorGeometryMenu()
+        {
+            if (!System.IO.File.Exists(RoverInterior.ScenePath)) { CreateInteriorScene(); return; }
+            if (!UnityEditor.SceneManagement.EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo()) return;
+            var scene = UnityEditor.SceneManagement.EditorSceneManager.OpenScene(RoverInterior.ScenePath);
+            var room = Object.FindAnyObjectByType<InteriorRoom>();
+            if (!room)
+            {
+                EditorUtility.DisplayDialog("Rover Interior", "No InteriorRoom component in the scene.", "OK");
+                return;
+            }
+            if (room.transform.Find("Cabin") &&
+                !EditorUtility.DisplayDialog("Rover Interior", "The scene already has a Cabin. Replace it (your edits to it will be lost)?", "Replace", "Cancel"))
+                return;
+            BuildInteriorGeometry(room);
+            UnityEditor.SceneManagement.EditorSceneManager.SaveScene(scene);
+            Selection.activeGameObject = room.interiorCamera ? room.interiorCamera.transform.parent.gameObject : room.gameObject;
+            SceneView.lastActiveSceneView?.FrameSelected();
+        }
+
+        /// <summary>Builds the cabin under the room with saved material assets and wires up the room's references.</summary>
+        public static void BuildInteriorGeometry(InteriorRoom room)
+        {
+            var old = room.transform.Find("Cabin");
+            if (old) Object.DestroyImmediate(old.gameObject);
+
+            var built = InteriorRoom.BuildRoomGeometry(room.transform, SaveInteriorMaterials());
+            Undo.RegisterCreatedObjectUndo(built.cam.transform.parent.gameObject, "Build Rover Interior");
+            room.interiorCamera = built.cam;
+            room.fuelLevel = built.level;
+            EditorUtility.SetDirty(room);
+            UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(room.gameObject.scene);
+        }
+
+        /// <summary>Reuses the material assets in Assets/Materials/RoverInterior, creating any that are missing.</summary>
+        static InteriorRoom.RoomMaterials SaveInteriorMaterials()
+        {
+            if (!AssetDatabase.IsValidFolder(InteriorMaterialsFolder))
+                AssetDatabase.CreateFolder("Assets/Materials", "RoverInterior");
+            var fresh = InteriorRoom.CreateMaterials();
+            Material Keep(Material m)
+            {
+                string p = $"{InteriorMaterialsFolder}/{m.name}.mat";
+                var existing = AssetDatabase.LoadAssetAtPath<Material>(p);
+                if (existing) { Object.DestroyImmediate(m); return existing; }
+                AssetDatabase.CreateAsset(m, p);
+                return m;
+            }
+            var mats = new InteriorRoom.RoomMaterials
+            {
+                wall = Keep(fresh.wall), floor = Keep(fresh.floor), panel = Keep(fresh.panel),
+                dark = Keep(fresh.dark), glow = Keep(fresh.glow),
+            };
+            AssetDatabase.SaveAssets();
+            return mats;
         }
 
         static void AddToBuildSettings(string path)
