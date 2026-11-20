@@ -10,17 +10,16 @@ public class DisplayMap : MonoBehaviour
     [SerializeField] MapManager mapManager;
     private void Update()
     {
-        foreach (GameObject a in eo) 
-        {
-            Destroy(a);
-        }
-        eo.Clear();
-
+        int i = 0;
         foreach (MapManager.Enemie e in mapManager.enemies) 
         {
             Vector2 posOnMap = mapManager.playerPosition - e.GetActualPosition();
             Vector3 position = new Vector3(posOnMap.x, 0, posOnMap.y);
-            eo.Add(Instantiate(enemyPrefab, posOnMap, Quaternion.identity));
+
+            if (eo.Count <= i) eo.Add(Instantiate(enemyPrefab, position, Quaternion.Euler(90,0,0)));
+            
+            eo[i].transform.position = position;
+            i++;
         }
     }
 }

@@ -4,18 +4,22 @@ using UnityEngine;
 
 public class MapManager : MonoBehaviour
 {
+    public static MapManager Instance;
     int checkID = 0;
     public List<Enemie>enemies = new List<Enemie>();
     public Vector2 playerPosition = new Vector2(0,0);
+    public Vector2 playerTarget = new Vector2(0,0);
+    public float speed;
 
     private void Start()
     {
-        enemies.Add(new Enemie(Random.Range(0.1f, 0.5f)));
-        enemies.Add(new Enemie(Random.Range(0.1f, 0.5f)));
-        enemies.Add(new Enemie(Random.Range(0.1f, 0.5f)));
-        enemies.Add(new Enemie(Random.Range(0.1f, 0.5f)));
-        enemies.Add(new Enemie(Random.Range(0.1f, 0.5f)));
-        enemies.Add(new Enemie(Random.Range(0.1f, 0.5f)));
+        enemies.Add(new Enemie(Random.Range(0.5f, 2f)));
+        enemies.Add(new Enemie(Random.Range(0.5f, 2f)));
+        enemies.Add(new Enemie(Random.Range(0.5f, 2f)));
+        enemies.Add(new Enemie(Random.Range(0.5f, 2f)));
+        enemies.Add(new Enemie(Random.Range(0.5f, 2f)));
+        enemies.Add(new Enemie(Random.Range(0.5f, 2f)));
+        enemies.Add(new Enemie(Random.Range(0.5f, 2f)));
     }
 
     private void Update()
@@ -23,8 +27,11 @@ public class MapManager : MonoBehaviour
         checkID++;
         if(checkID >= enemies.Count)checkID = 0;
         Enemie e = enemies[checkID];
-        if (Vector2.Distance(e.GetActualPosition(), playerPosition) > 1) Debug.Log("Ktoœ nadchodzi");
-        if(e.endTime >= Time.time)e.Recalculate();
+        if (Vector2.Distance(e.GetActualPosition(), playerPosition) < 1) Debug.Log("Ktoœ nadchodzi");
+        if(e.endTime <= Time.time)e.Recalculate();
+
+
+        playerPosition = Vector2.MoveTowards(playerPosition, playerTarget, speed * Time.deltaTime);
     }
 
     public class Enemie
@@ -39,7 +46,7 @@ public class MapManager : MonoBehaviour
         { 
             this.speed = speed;
 
-            goTo = new Vector2 (Random.Range(-20, 20), -20);
+            goTo = new Vector2 (Random.Range(-10f, 10f), -10f);
             
             Recalculate();
         }
@@ -52,8 +59,8 @@ public class MapManager : MonoBehaviour
         public void Recalculate() 
         {
             lastPosition = goTo;
-            goTo = new Vector2(Random.Range(-20, 20), Random.Range(-20, 20));
-            endTime = Vector2.Distance(lastPosition, goTo)/speed+Time.time;
+            goTo = new Vector2(Random.Range(-10f, 10f), Random.Range(-10f, 10f));
+            endTime = (Vector2.Distance(lastPosition, goTo)/speed)+Time.time;
             startTime = Time.time;
         }
     }
