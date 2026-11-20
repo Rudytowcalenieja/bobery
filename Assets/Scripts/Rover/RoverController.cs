@@ -180,6 +180,9 @@ namespace Bobery.Rover
             // Fuel: walking burns it in proportion to distance.
             _tank = GetComponent<FuelTank>();
             if (!_tank) _tank = gameObject.AddComponent<FuelTank>();
+
+            // Battery: powers the map and weapons, recharged only by beacons.
+            if (!GetComponent<RoverBattery>()) gameObject.AddComponent<RoverBattery>();
         }
 
         void Update()

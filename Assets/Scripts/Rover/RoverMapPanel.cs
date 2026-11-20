@@ -45,6 +45,16 @@ namespace Bobery.Rover
         [Header("Ground")]
         public LayerMask groundMask = ~0;
 
+        [Header("Beacons")]
+        [Tooltip("How many charging beacons the player owns.")]
+        [Min(0)] public int beaconCount = 4;
+        [Tooltip("Fuel (litres, from the inventory) spent to drop one beacon.")]
+        [Min(0f)] public float beaconCost = 10f;
+        [Tooltip("Radius of a beacon's charging zone (metres).")]
+        [Min(1f)] public float beaconRadius = 15f;
+        [Tooltip("Battery charge per second while the rover is inside a zone.")]
+        [Min(0f)] public float beaconChargePerSecond = 4f;
+
         // ---- theme
         static readonly Color Black = new Color(0.03f, 0.03f, 0.035f, 0.97f);
         static readonly Color White = Color.white;
@@ -86,6 +96,27 @@ namespace Bobery.Rover
         Text _fuelValue, _fuelInfo, _fuelLabel;
         float _fuelFlash;
 
+        // ---- battery
+        RoverBattery _battery;
+        RectTransform _batTrack, _batFill, _noSignal, _batAlert;
+        Image _batFillImg, _batAlertBg;
+        Text _batValue, _batLabel, _batAlertText;
+        RawImage _mapImage;
+        float _batFlash;
+
+        // ---- beacons
+        class BeaconMark { public RectTransform rt, zone, icon; public Image zoneImg, ringImg, iconImg; public Text label; }
+        class Slot { public RectTransform rt; public Image bg, glyph; public Text cross; }
+        readonly List<BeaconMark> _beaconMarks = new List<BeaconMark>();
+        readonly List<Slot> _slots = new List<Slot>();
+        RectTransform _beaconRoot, _placeGhost, _beaconActions;
+        Text _beaconCount, _beaconInfo;
+        Btn _pickUpBtn, _destroyBtn;
+        bool _placing;
+        Beacon _selected, _hoverBeacon;
+        float _destroyConfirm;
+        Sprite _ringSprite, _discSprite, _glyphSprite;
+
         // ---- state
         string _lastState = "";
         float _toastTimer;
@@ -98,6 +129,7 @@ namespace Bobery.Rover
             public Text label;
             public Action onClick;
             public bool filled;   // filled = white button with black text
+            public bool enabled = true;
         }
 
         // ================================================================ lifecycle
@@ -118,6 +150,8 @@ namespace Bobery.Rover
             _hiddenLayer = LayerMask.NameToLayer("TransparentFX");
             if (_hiddenLayer < 0) _hiddenLayer = 1;
 
+            BeaconNetwork.Configure(beaconCount, PlayerInventory.Fuel, beaconCost, beaconRadius, beaconChargePerSecond);
+
             BuildMapCamera();
             BuildUI();
             BuildWorldMarker();
@@ -126,6 +160,8 @@ namespace Bobery.Rover
             if (rover) rover.Arrived += OnArrived;
             if (rover) _tank = rover.GetComponent<FuelTank>();
             if (_tank) _tank.RanOut += OnRanOut;
+            if (rover) _battery = rover.GetComponent<RoverBattery>();
+            if (_battery) { _battery.RanOut += OnBatteryOut; _battery.Restored += OnBatteryRestored; }
             RoverHud.Notified += Toast;
         }
 
@@ -133,6 +169,7 @@ namespace Bobery.Rover
         {
             if (rover) rover.Arrived -= OnArrived;
             if (_tank) _tank.RanOut -= OnRanOut;
+            if (_battery) { _battery.RanOut -= OnBatteryOut; _battery.Restored -= OnBatteryRestored; }
             RoverHud.Notified -= Toast;
             if (_rt) _rt.Release();
             if (_marker) Destroy(_marker.gameObject);
@@ -262,13 +299,17 @@ namespace Bobery.Rover
             // ---- Telemetry
             Section("TELEMETRY", y, inner);
             y += 26;
-            float gap = 10f, cw = (inner - gap) / 2f, ch = 74f;
+            float gap = 10f, cw = (inner - gap) / 2f, ch = 34f;
             _speedVal = Card("SPEED", Pad, y, cw, ch);
             _headingVal = Card("HEADING", Pad + cw + gap, y, cw, ch);
-            y += ch + gap;
+            y += ch + 6f;
             _distVal = Card("DISTANCE", Pad, y, cw, ch);
             _etaVal = Card("ETA", Pad + cw + gap, y, cw, ch);
-            y += ch + 22;
+            y += ch + 18;
+
+            // ---- Beacons
+            BuildBeaconBlock(y, inner);
+            y += 26 + 44 + 18;
 
             // ---- Route progress
             Section("ROUTE", y, inner);
@@ -309,6 +350,340 @@ namespace Bobery.Rover
             KeyHint(footer, kx, "E", "Enter");
 
             BuildFuelBlock(inner);
+            BuildBatteryBlock(inner);
+        }
+
+        // ================================================================ battery
+
+        /// <summary>Battery gauge, just above the fuel gauge.</summary>
+        void BuildBatteryBlock(float inner)
+        {
+            var block = NewRect("Battery", _panel);
+            block.anchorMin = block.anchorMax = new Vector2(0, 0);
+            block.pivot = new Vector2(0, 0);
+            block.anchoredPosition = new Vector2(Pad, Pad + 56 + 70 + 12);
+            block.sizeDelta = new Vector2(inner, 34);
+
+            _batLabel = Label(block, "BATTERY", 12, FontStyle.Bold, Dim);
+            TopLeft(_batLabel.rectTransform, 0, 0, inner, 16);
+            _batValue = Label(block, "", 13, FontStyle.Bold, White, _mono);
+            TopLeft(_batValue.rectTransform, 0, -2, inner, 18);
+            _batValue.alignment = TextAnchor.UpperRight;
+
+            _batTrack = NewRect("Track", block);
+            TopLeft(_batTrack, 0, 22, inner, 10);
+            Img(_batTrack, Faint);
+            Outline(_batTrack, new Color(1, 1, 1, 0.25f), 1);
+            for (int i = 1; i < 10; i++) // cell segments
+            {
+                var t = NewRect("Cell", _batTrack);
+                t.anchorMin = t.anchorMax = new Vector2(i / 10f, 0.5f);
+                t.sizeDelta = new Vector2(2, 10);
+                Img(t, new Color(0, 0, 0, 0.75f));
+            }
+            _batFill = NewRect("Fill", _batTrack);
+            _batFill.anchorMin = new Vector2(0, 0); _batFill.anchorMax = new Vector2(0, 1);
+            _batFill.pivot = new Vector2(0, 0.5f);
+            _batFill.offsetMin = new Vector2(2, 2); _batFill.offsetMax = new Vector2(2, -2);
+            _batFillImg = Img(_batFill, White);
+            _batFill.SetAsFirstSibling();
+        }
+
+        void UpdateBattery()
+        {
+            if (!_batTrack) return;
+            bool empty = _battery && _battery.IsEmpty;
+
+            if (!_battery) { _batValue.text = "—"; }
+            else
+            {
+                float w = _batTrack.rect.width - 4f;
+                _batFill.sizeDelta = new Vector2(w * _battery.Fraction, _batFill.sizeDelta.y);
+                string left = float.IsInfinity(_battery.MapTimeLeft) ? "" : $"   {Clock(_battery.MapTimeLeft)}";
+                _batValue.text = $"{_battery.Fraction * 100f:0}%{left}";
+
+                _batFlash = Mathf.Max(0f, _batFlash - Time.deltaTime);
+                float blink = 0.5f + 0.5f * Mathf.Sin(Time.time * 8f);
+                bool charging = _battery.IsCharging && _battery.Fraction < 0.999f;
+                bool warn = (_battery.IsLow && !charging) || _batFlash > 0f;
+                _batFillImg.color = charging ? new Color(1, 1, 1, Mathf.Lerp(0.6f, 1f, 0.5f + 0.5f * Mathf.Sin(Time.time * 4f)))
+                                  : warn ? new Color(1, 1, 1, Mathf.Lerp(0.35f, 1f, blink)) : White;
+                _batLabel.text = empty ? "BATTERY  —  DEPLETED" : charging ? "BATTERY  —  CHARGING"
+                               : _battery.IsLow ? "BATTERY  —  LOW" : "BATTERY";
+                _batLabel.color = warn || empty || charging ? White : Dim;
+            }
+
+            // No power → no picture. The overlay (rover, beacons, route) keeps working so you can drive blind to a beacon.
+            if (_mapCam) _mapCam.enabled = !empty;
+            if (_mapImage) _mapImage.color = Color.Lerp(_mapImage.color, empty ? new Color(0.06f, 0.06f, 0.06f) : White, Time.deltaTime * 6f);
+            _noSignal.gameObject.SetActive(empty);
+            _batAlert.gameObject.SetActive(empty);
+            if (empty)
+            {
+                float a = 0.55f + 0.45f * Mathf.Abs(Mathf.Sin(Time.time * 2.5f));
+                _batAlertBg.color = new Color(1, 1, 1, a);
+            }
+        }
+
+        void OnBatteryOut()
+        {
+            _batFlash = 3f;
+            Toast("Battery depleted: map offline, weapons disabled");
+        }
+
+        void OnBatteryRestored() => Toast("Battery charging: map online");
+
+        static string Clock(float secs)
+        {
+            int s = Mathf.CeilToInt(secs);
+            return s >= 3600 ? $"{s / 3600}:{s / 60 % 60:00}:{s % 60:00}" : $"{s / 60}:{s % 60:00}";
+        }
+
+        // ================================================================ beacons
+
+        void BuildBeaconBlock(float y, float inner)
+        {
+            Section("BEACONS", y, inner);
+            _beaconCount = Label(_panel, "", 12, FontStyle.Bold, Dim, _mono);
+            TopLeft(_beaconCount.rectTransform, Pad, y, inner, 16);
+            _beaconCount.alignment = TextAnchor.UpperRight;
+            y += 26;
+
+            _glyphSprite = BeaconGlyph(64);
+            const float s = 44f, sg = 8f;
+            int n = Mathf.Max(1, beaconCount);
+            float slotW = Mathf.Min(s, (inner * 0.6f - sg * (n - 1)) / n);
+            for (int i = 0; i < beaconCount; i++)
+            {
+                var rt = NewRect("BeaconSlot" + i, _panel);
+                TopLeft(rt, Pad + i * (slotW + sg), y, slotW, s);
+                var bg = Img(rt, Ghost);
+                Outline(rt, new Color(1, 1, 1, 0.35f), 1);
+                var g = Img(NewRect("Glyph", rt), White);
+                g.sprite = _glyphSprite;
+                g.preserveAspect = true;
+                Stretch(g.rectTransform, 7);
+                var x = Label(rt, "×", 26, FontStyle.Bold, White);
+                Stretch(x.rectTransform, 0);
+                x.alignment = TextAnchor.MiddleCenter;
+                _slots.Add(new Slot { rt = rt, bg = bg, glyph = g, cross = x });
+            }
+
+            float ix = beaconCount > 0 ? Pad + beaconCount * (slotW + sg) + 4f : Pad;
+            float iw = Pad + inner - ix;
+            _beaconInfo = Label(_panel, "", 11, FontStyle.Normal, Dim, _mono);
+            TopLeft(_beaconInfo.rectTransform, ix, y + 2, iw, s);
+            _beaconInfo.alignment = TextAnchor.UpperLeft;
+
+            // Actions for the selected beacon (shown instead of the info text).
+            _beaconActions = NewRect("BeaconActions", _panel);
+            TopLeft(_beaconActions, ix, y, iw, s);
+            _pickUpBtn = AddButton("PICK UP", 0, 0, iw, 20, filled: false, PickUpSelected, _beaconActions);
+            _destroyBtn = AddButton("DESTROY", 0, 24, iw, 20, filled: false, DestroySelected, _beaconActions);
+            _pickUpBtn.label.fontSize = _destroyBtn.label.fontSize = 11;
+            _beaconActions.gameObject.SetActive(false);
+        }
+
+        void BuildBeaconMapLayer()
+        {
+            _ringSprite = Ring(256, 0.975f);
+            _discSprite = Circle(128, 0f);
+            _beaconRoot = NewRect("Beacons", _map);
+            Stretch(_beaconRoot, 0);
+
+            _placeGhost = NewRect("PlaceGhost", _map);
+            Img(_placeGhost, new Color(1, 1, 1, 0.08f)).sprite = _discSprite;
+            var ring = NewRect("Ring", _placeGhost);
+            Stretch(ring, 0);
+            Img(ring, new Color(1, 1, 1, 0.8f)).sprite = _ringSprite;
+            var icon = NewRect("Icon", _placeGhost);
+            icon.sizeDelta = new Vector2(16, 16);
+            var ii = Img(icon, new Color(1, 1, 1, 0.8f)); ii.sprite = _glyphSprite; ii.preserveAspect = true;
+            _placeGhost.gameObject.SetActive(false);
+        }
+
+        BeaconMark Mark(int i)
+        {
+            while (_beaconMarks.Count <= i)
+            {
+                var m = new BeaconMark();
+                m.rt = NewRect("Beacon", _beaconRoot);
+                m.rt.sizeDelta = Vector2.zero;
+                m.zone = NewRect("Zone", m.rt);
+                m.zoneImg = Img(m.zone, new Color(1, 1, 1, 0.08f)); m.zoneImg.sprite = _discSprite;
+                var ring = NewRect("Ring", m.zone);
+                Stretch(ring, 0);
+                m.ringImg = Img(ring, new Color(1, 1, 1, 0.6f)); m.ringImg.sprite = _ringSprite;
+                m.icon = NewRect("Icon", m.rt);
+                m.icon.sizeDelta = new Vector2(16, 16);
+                m.iconImg = Img(m.icon, White); m.iconImg.sprite = _glyphSprite; m.iconImg.preserveAspect = true;
+                m.label = Label(m.rt, "", 11, FontStyle.Bold, White, _mono);
+                var lr = m.label.rectTransform;
+                lr.anchorMin = lr.anchorMax = new Vector2(0.5f, 0.5f);
+                lr.pivot = new Vector2(0.5f, 1f);
+                lr.anchoredPosition = new Vector2(0, -11);
+                lr.sizeDelta = new Vector2(90, 14);
+                m.label.alignment = TextAnchor.UpperCenter;
+                m.label.gameObject.AddComponent<Shadow>().effectColor = new Color(0, 0, 0, 0.9f);
+                _beaconMarks.Add(m);
+            }
+            _beaconMarks[i].rt.gameObject.SetActive(true);
+            return _beaconMarks[i];
+        }
+
+        void UpdateBeacons()
+        {
+            if (_selected && !_selected.isActiveAndEnabled) _selected = null;
+            if (_selected && _selected.Phase != Beacon.State.Active && _selected.Phase != Beacon.State.Falling) _selected = null;
+            _destroyConfirm = Mathf.Max(0f, _destroyConfirm - Time.deltaTime);
+
+            // ---- map icons
+            var list = BeaconNetwork.Deployed;
+            int shown = 0;
+            if (_beaconRoot && rover)
+            {
+                float pxPerM = Mathf.Abs(WorldToMapUnclamped(rover.transform.position + Vector3.right).x
+                                         - WorldToMapUnclamped(rover.transform.position).x);
+                Rect r = _map.rect;
+                foreach (var b in list)
+                {
+                    if (!b) continue;
+                    Vector2 p = WorldToMapUnclamped(b.transform.position);
+                    float rad = b.radius * pxPerM;
+                    if (Mathf.Abs(p.x) > r.width * 0.5f + rad || Mathf.Abs(p.y) > r.height * 0.5f + rad) continue;
+                    var m = Mark(shown++);
+                    m.rt.anchoredPosition = p;
+                    float open = b.Phase == Beacon.State.Falling ? 0f : 1f - Mathf.Pow(1f - b.ZoneOpen, 3f);
+                    m.zone.sizeDelta = Vector2.one * (rad * 2f * open);
+                    bool sel = b == _selected, hov = b == _hoverBeacon;
+                    float pulse = b.RoverInside ? 0.5f + 0.5f * Mathf.Sin(Time.time * 6f) : 0f;
+                    m.zoneImg.color = new Color(1, 1, 1, 0.06f + 0.06f * pulse + (sel ? 0.05f : 0f));
+                    m.ringImg.color = new Color(1, 1, 1, sel ? 1f : hov ? 0.85f : 0.55f);
+                    m.icon.sizeDelta = Vector2.one * (sel || hov ? 20f : 16f);
+                    m.iconImg.color = b.Phase == Beacon.State.Falling ? new Color(1, 1, 1, 0.5f + 0.5f * Mathf.Sin(Time.time * 20f)) : White;
+                    m.label.text = sel ? "SELECTED" : b.RoverInside ? "CHARGING" : "";
+                }
+            }
+            for (int i = shown; i < _beaconMarks.Count; i++) _beaconMarks[i].rt.gameObject.SetActive(false);
+
+            // ---- panel slots: ready, then deployed, then destroyed
+            int ready = BeaconNetwork.Available, deployed = list.Count;
+            for (int i = 0; i < _slots.Count; i++)
+            {
+                var s = _slots[i];
+                bool isReady = i < ready, isDeployed = !isReady && i < ready + deployed;
+                bool armed = _placing && isReady && i == 0;
+                bool selected = isDeployed && _selected && IndexOf(_selected) == i - ready;
+                bool hover = Mouse.current != null && RectTransformUtility.RectangleContainsScreenPoint(s.rt, Mouse.current.position.ReadValue(), null);
+                bool light = armed || selected || (hover && (isReady || isDeployed));
+                s.bg.color = light ? White : isReady ? Ghost : new Color(0, 0, 0, 0.3f);
+                s.glyph.color = light ? Color.black : isReady ? White : isDeployed ? new Color(1, 1, 1, 0.45f) : new Color(1, 1, 1, 0.12f);
+                s.cross.gameObject.SetActive(!isReady && !isDeployed);
+                s.cross.color = new Color(1, 1, 1, 0.5f);
+            }
+
+            _beaconCount.text = $"{ready}/{BeaconNetwork.Capacity}";
+            bool showActions = _selected && !_placing;
+            _beaconActions.gameObject.SetActive(showActions);
+            _beaconInfo.gameObject.SetActive(!showActions);
+            if (showActions)
+            {
+                bool inZone = rover && _selected.FlatDistance(rover.transform.position) <= _selected.radius;
+                _pickUpBtn.enabled = inZone && _selected.IsActive;
+                _destroyBtn.label.text = _destroyConfirm > 0f ? "CONFIRM?" : "DESTROY";
+            }
+            else if (_placing)
+                _beaconInfo.text = $"<color=#ffffff>CLICK THE MAP</color>\nCOST {BeaconNetwork.CostText}\nRMB / ESC CANCEL";
+            else
+            {
+                string afford = BeaconNetwork.CanAfford ? "" : "  <color=#ffffff>(LOW)</color>";
+                _beaconInfo.text = ready > 0
+                    ? $"COST {BeaconNetwork.CostText}{afford}\nZONE {BeaconNetwork.Radius:0} m · PICK SLOT"
+                    : deployed > 0 ? "NONE IN STOCK\nPICK ONE UP TO REUSE" : "NO BEACONS LEFT";
+            }
+        }
+
+        static int IndexOf(Beacon b)
+        {
+            var list = BeaconNetwork.Deployed;
+            for (int i = 0; i < list.Count; i++) if (list[i] == b) return i;
+            return -1;
+        }
+
+        /// <summary>Beacon slot clicked: a ready one arms placement, a deployed one selects that beacon.</summary>
+        void OnSlotClicked(int i)
+        {
+            int ready = BeaconNetwork.Available;
+            var list = BeaconNetwork.Deployed;
+            if (i < ready)
+            {
+                _selected = null;
+                if (_placing) { _placing = false; return; }
+                if (!BeaconNetwork.CanAfford) { Toast($"Need {BeaconNetwork.CostText} to drop a beacon"); return; }
+                _placing = true;
+                Toast("Click the map to drop a beacon");
+            }
+            else if (i < ready + list.Count)
+            {
+                _placing = false;
+                var b = list[i - ready];
+                _selected = _selected == b ? null : b;
+            }
+        }
+
+        void PickUpSelected()
+        {
+            if (!_selected) return;
+            if (!rover || _selected.FlatDistance(rover.transform.position) > _selected.radius)
+            { Toast("Drive into the beacon's zone to pick it up"); return; }
+            if (!_selected.IsActive) return;
+            BeaconNetwork.PickUp(_selected);
+            _selected = null;
+            Toast("Beacon recovered");
+        }
+
+        void DestroySelected()
+        {
+            if (!_selected) return;
+            if (_destroyConfirm <= 0f) { _destroyConfirm = 2f; return; }
+            BeaconNetwork.DestroyBeacon(_selected);
+            _selected = null;
+            _destroyConfirm = 0f;
+            Toast("Beacon destroyed");
+        }
+
+        /// <summary>Beacon icon under the cursor on the map (within a few pixels), or null.</summary>
+        Beacon BeaconUnder(Vector2 local)
+        {
+            Beacon best = null;
+            float bestD = 14f;
+            foreach (var b in BeaconNetwork.Deployed)
+            {
+                if (!b) continue;
+                float d = Vector2.Distance(WorldToMapUnclamped(b.transform.position), local);
+                if (d < bestD) { bestD = d; best = b; }
+            }
+            return best;
+        }
+
+        /// <summary>Beacon-shaped glyph: a head on a mast with a base, pointing into the ground.</summary>
+        static Sprite BeaconGlyph(int n)
+        {
+            var tex = NewTex(n, n);
+            var px = new Color32[n * n];
+            for (int y = 0; y < n; y++)
+            for (int x = 0; x < n; x++)
+            {
+                var p = new Vector2((x + 0.5f) / n, (y + 0.5f) / n);
+                bool head = Vector2.Distance(p, new Vector2(0.5f, 0.78f)) < 0.14f;
+                bool mast = Mathf.Abs(p.x - 0.5f) < 0.05f && p.y > 0.2f && p.y < 0.7f;
+                bool plate = Mathf.Abs(p.y - 0.3f) < 0.045f && Mathf.Abs(p.x - 0.5f) < 0.3f;
+                bool spike = InTri(p, new Vector2(0.4f, 0.26f), new Vector2(0.6f, 0.26f), new Vector2(0.5f, 0.04f));
+                bool bars = Mathf.Abs(p.y - 0.78f) < 0.025f && Mathf.Abs(p.x - 0.5f) < 0.3f;
+                px[y * n + x] = head || mast || plate || spike || bars ? new Color32(255, 255, 255, 255) : new Color32(255, 255, 255, 0);
+            }
+            tex.SetPixels32(px); tex.Apply();
+            return Sprite.Create(tex, new Rect(0, 0, n, n), new Vector2(0.5f, 0.5f));
         }
 
         /// <summary>Fuel gauge pinned to the bottom-left of the panel, just above the key hints.</summary>
@@ -389,7 +764,8 @@ namespace Bobery.Rover
 
             _map = NewRect("Map", frame);
             Stretch(_map, 1);
-            _map.gameObject.AddComponent<RawImage>().texture = _rt;
+            _mapImage = _map.gameObject.AddComponent<RawImage>();
+            _mapImage.texture = _rt;
             _map.gameObject.AddComponent<RectMask2D>(); // clip route lines that run off the map
             Outline(frame, Faint, 1);
             Brackets(frame, 16, 2, White);
@@ -416,6 +792,9 @@ namespace Bobery.Rover
                 c.sizeDelta = i == 0 ? new Vector2(14, 1) : new Vector2(1, 14);
                 Img(c, new Color(1, 1, 1, 0.25f)).raycastTarget = false;
             }
+
+            // Beacon zones + placement ghost (under the route and the rover).
+            BuildBeaconMapLayer();
 
             // Route (dashed, flowing polyline, built on demand), destination dot, hover ghost, rover arrow
             _pathRoot = NewRect("Route", _map);
@@ -499,6 +878,26 @@ namespace Bobery.Rover
             _coordText.alignment = TextAnchor.LowerRight;
             _coordText.gameObject.AddComponent<Shadow>().effectColor = new Color(0, 0, 0, 0.9f);
 
+            // No power: centre label on the map + blinking alert banner across the top of the map.
+            _noSignal = NewRect("NoSignal", frame);
+            _noSignal.anchorMin = _noSignal.anchorMax = new Vector2(0.5f, 0.5f);
+            _noSignal.sizeDelta = new Vector2(side - 40, 60);
+            _noSignal.anchoredPosition = new Vector2(0, 40);
+            var ns = Label(_noSignal, "NO SIGNAL", 22, FontStyle.Bold, new Color(1, 1, 1, 0.35f), _mono);
+            Stretch(ns.rectTransform, 0);
+            ns.alignment = TextAnchor.MiddleCenter;
+            _noSignal.gameObject.SetActive(false);
+
+            _batAlert = NewRect("BatteryAlert", frame);
+            _batAlert.anchorMin = new Vector2(0, 1); _batAlert.anchorMax = new Vector2(1, 1);
+            _batAlert.pivot = new Vector2(0.5f, 1);
+            _batAlert.offsetMin = new Vector2(10, -30 - 46); _batAlert.offsetMax = new Vector2(-48, -30);
+            _batAlertBg = Img(_batAlert, White);
+            _batAlertText = Label(_batAlert, "<b>BATTERY DEPLETED</b>\n<size=11>Map offline · weapons disabled · recharge at a beacon</size>", 14, FontStyle.Normal, Color.black);
+            Stretch(_batAlertText.rectTransform, 4);
+            _batAlertText.alignment = TextAnchor.MiddleCenter;
+            _batAlert.gameObject.SetActive(false);
+
             _toast = NewRect("Toast", frame);
             _toast.anchorMin = _toast.anchorMax = new Vector2(0.5f, 0);
             _toast.pivot = new Vector2(0.5f, 0);
@@ -534,6 +933,8 @@ namespace Bobery.Rover
             UpdateMapOverlay();
             UpdateTelemetry();
             UpdateFuel();
+            UpdateBattery();
+            UpdateBeacons();
 
             // Slide-in on start.
             _openT = Mathf.Min(1f, _openT + Time.unscaledDeltaTime / 0.45f);
@@ -560,19 +961,40 @@ namespace Bobery.Rover
 
             // Buttons (hover + click)
             bool overButton = false;
+            Action clicked = null;
             foreach (var b in _buttons)
             {
-                bool hover = RectTransformUtility.RectangleContainsScreenPoint(b.rt, screen, null);
-                overButton |= hover;
+                if (!b.rt.gameObject.activeInHierarchy) continue;
+                bool inside = RectTransformUtility.RectangleContainsScreenPoint(b.rt, screen, null);
+                overButton |= inside;
+                bool hover = inside && b.enabled;
                 bool light = b.filled != hover;      // hover inverts the colours
-                b.bg.color = light ? White : new Color(0, 0, 0, 0.55f);
-                b.label.color = light ? Color.black : White;
-                if (hover && click) b.onClick?.Invoke();
+                float a = b.enabled ? 1f : 0.35f;
+                b.bg.color = light ? new Color(1, 1, 1, a) : new Color(0, 0, 0, 0.55f);
+                b.label.color = light ? new Color(0, 0, 0, a) : new Color(1, 1, 1, a);
+                // a disabled PICK UP still explains why it can't be used
+                if (inside && click) clicked = b.enabled ? b.onClick : (b == _pickUpBtn ? PickUpSelected : null);
+            }
+            // Beacon slots
+            for (int i = 0; i < _slots.Count; i++)
+            {
+                if (!RectTransformUtility.RectangleContainsScreenPoint(_slots[i].rt, screen, null)) continue;
+                overButton = true;
+                if (click) { int k = i; clicked = () => OnSlotClicked(k); }
+            }
+            clicked?.Invoke(); // after the loops: a click may show/hide buttons
+
+            if (kb != null && kb.escapeKey.wasPressedThisFrame)
+            {
+                if (_placing) { _placing = false; Toast("Placement cancelled"); }
+                else _selected = null;
             }
 
             bool overMap = _map && RectTransformUtility.RectangleContainsScreenPoint(_map, screen, null) && !overButton;
 
             // Hover ghost
+            _hoverBeacon = null;
+            _placeGhost.gameObject.SetActive(false);
             if (overMap && TryMapPoint(screen, out RaycastHit hoverHit, out Vector2 local))
             {
                 _hoverIcon.gameObject.SetActive(true);
@@ -580,7 +1002,19 @@ namespace Bobery.Rover
                 bool water = hoverHit.point.y < _waterY - 0.05f;
                 float d = rover ? Flat(rover.transform.position, hoverHit.point) : 0f;
                 bool tooClose = rover && d <= rover.arriveDistance;
-                _hoverText.text = water ? "WATER" : tooClose ? "TOO CLOSE" : $"{d:0} m";
+                if (_placing)
+                {
+                    float pxPerM = Mathf.Abs(WorldToMapUnclamped(hoverHit.point + Vector3.right).x - WorldToMapUnclamped(hoverHit.point).x);
+                    _placeGhost.gameObject.SetActive(true);
+                    _placeGhost.anchoredPosition = local;
+                    _placeGhost.sizeDelta = Vector2.one * (BeaconNetwork.Radius * pxPerM * 2f);
+                    _hoverText.text = water ? "WATER" : "DROP";
+                }
+                else
+                {
+                    _hoverBeacon = BeaconUnder(local);
+                    _hoverText.text = _hoverBeacon ? "BEACON" : water ? "WATER" : tooClose ? "TOO CLOSE" : $"{d:0} m";
+                }
             }
             else _hoverIcon.gameObject.SetActive(false);
 
@@ -591,10 +1025,26 @@ namespace Bobery.Rover
 
             if (mouse.rightButton.wasPressedThisFrame)
             {
+                if (_placing) { _placing = false; Toast("Placement cancelled"); return; }
                 if (rover.HasDestination) { rover.Stop(); Toast("Rover stopped"); }
                 return;
             }
             if (!click) return;
+
+            if (_placing)
+            {
+                if (!TryMapPoint(screen, out RaycastHit ph, out _)) { Toast("No ground there"); return; }
+                if (ph.point.y < _waterY - 0.05f) { Toast("Can't drop a beacon into water"); return; }
+                if (!BeaconNetwork.TryPlace(ph.point, out _, out string err)) { Toast(err); _placing = false; return; }
+                _placing = false;
+                Toast($"Beacon inbound  (-{BeaconNetwork.CostText})");
+                return;
+            }
+            if (_hoverBeacon)
+            {
+                _selected = _selected == _hoverBeacon ? null : _hoverBeacon;
+                return;
+            }
 
             if (_tank && _tank.IsEmpty)
             {
@@ -773,14 +1223,14 @@ namespace Bobery.Rover
             if (!rover) return;
 
             float speed = Mathf.Abs(rover.CurrentSpeed);
-            _speedVal.text = $"{speed * 3.6f:0}<size=14> km/h</size>";
+            _speedVal.text = $"{speed * 3.6f:0}<size=11> km/h</size>";
 
             float yaw = (rover.transform.eulerAngles.y + 360f) % 360f;
-            _headingVal.text = $"{yaw:000}°<size=14> {Cardinal(yaw)}</size>";
+            _headingVal.text = $"{yaw:000}°<size=11> {Cardinal(yaw)}</size>";
 
             bool has = rover.HasDestination;
             float dist = rover.DistanceToDestination;
-            _distVal.text = has ? $"{dist:0}<size=14> m</size>" : "—";
+            _distVal.text = has ? $"{dist:0}<size=11> m</size>" : "—";
 
             if (has && speed > 0.3f)
             {
@@ -793,7 +1243,7 @@ namespace Bobery.Rover
             _progressFill.rectTransform.sizeDelta = new Vector2((panelWidth - Pad * 2f) * prog, 0);
             _progressText.text = has ? $"{prog * 100f:0}%" : "—";
 
-            string state = _tank && _tank.IsEmpty ? "NO FUEL" : has ? (speed > 0.3f ? "EN ROUTE" : "TURNING") : "IDLE";
+            string state = _tank && _tank.IsEmpty ? "NO FUEL" : _battery && _battery.IsEmpty ? "NO POWER" : has ? (speed > 0.3f ? "EN ROUTE" : "TURNING") : "IDLE";
             if (state != _lastState) { _stateText.text = state; _lastState = state; }
             float blink = has ? 0.35f + 0.65f * Mathf.Abs(Mathf.Sin(Time.time * 3f)) : 0.45f;
             _stateDot.color = new Color(1, 1, 1, blink);
@@ -852,15 +1302,18 @@ namespace Bobery.Rover
             TopLeft(card, x, y, w, h);
             Img(card, Ghost);
             Outline(card, Faint, 1);
-            var lbl = Label(card, name, 11, FontStyle.Bold, Dim);
-            TopLeft(lbl.rectTransform, 14, 12, w - 28, 14);
-            var val = Label(card, "—", 26, FontStyle.Bold, White, _mono);
-            TopLeft(val.rectTransform, 14, 30, w - 28, 34);
+            // compact: label on the left, value on the right, one line
+            var lbl = Label(card, name, 10, FontStyle.Bold, Dim);
+            TopLeft(lbl.rectTransform, 12, 0, w - 24, h);
+            lbl.alignment = TextAnchor.MiddleLeft;
+            var val = Label(card, "—", 17, FontStyle.Bold, White, _mono);
+            TopLeft(val.rectTransform, 12, 0, w - 24, h);
+            val.alignment = TextAnchor.MiddleRight;
             val.supportRichText = true;
             return val;
         }
 
-        void AddButton(string text, float x, float y, float w, float h, bool filled, Action onClick,
+        Btn AddButton(string text, float x, float y, float w, float h, bool filled, Action onClick,
                        Transform parent = null, Vector2? topRight = null)
         {
             var rt = NewRect("Btn_" + text, parent ? parent : _panel);
@@ -871,7 +1324,9 @@ namespace Bobery.Rover
             var label = Label(rt, text, text.Length <= 1 ? 18 : 13, FontStyle.Bold, filled ? Color.black : White);
             Stretch(label.rectTransform, 0);
             label.alignment = TextAnchor.MiddleCenter;
-            _buttons.Add(new Btn { rt = rt, bg = bg, label = label, onClick = onClick, filled = filled });
+            var btn = new Btn { rt = rt, bg = bg, label = label, onClick = onClick, filled = filled };
+            _buttons.Add(btn);
+            return btn;
         }
 
         float KeyHint(RectTransform parent, float x, string key, string action)
