@@ -1,3 +1,4 @@
+using TMPro;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.UI;
@@ -25,7 +26,7 @@ namespace Bobery.Rover
         // HUD
         readonly UIButtons _hudButtons = new UIButtons();
         RectTransform _gaugeTrack, _gaugeFill;
-        Text _gaugeText, _reserveText, _statusText, _toastText;
+        TextMeshProUGUI _gaugeText, _reserveText, _statusText, _toastText;
         RectTransform _toast;
         float _toastTimer;
 
@@ -34,9 +35,9 @@ namespace Bobery.Rover
         RectTransform _inv;
         CanvasGroup _invGroup;
         RectTransform _slotGrid;
-        Text _detailName, _detailAmount, _detailDesc;
+        TextMeshProUGUI _detailName, _detailAmount, _detailDesc;
         RectTransform _invGaugeTrack, _invGaugeFill;
-        Text _invGaugeText;
+        TextMeshProUGUI _invGaugeText;
         UIButtons.Button _pourBtn, _fillBtn;
         string _selected;
         readonly System.Collections.Generic.List<(RectTransform rt, string id)> _slotRects =
@@ -169,27 +170,31 @@ namespace Bobery.Rover
             side.anchorMin = new Vector2(0, 0); side.anchorMax = new Vector2(0, 1);
             side.pivot = new Vector2(0, 0.5f); side.sizeDelta = new Vector2(400, 0);
             RoverUI.Img(side, RoverUI.Black);
+            var sideEdge = RoverUI.Rect("Edge", side);
+            sideEdge.anchorMin = new Vector2(1, 0); sideEdge.anchorMax = new Vector2(1, 1);
+            sideEdge.pivot = new Vector2(1, 0.5f); sideEdge.sizeDelta = new Vector2(1, 0);
+            RoverUI.Img(sideEdge, RoverUI.Faint);
             const float pad = 24f, inner = 352f;
 
-            var eyebrow = RoverUI.Label(side, "ROVER  /  INTERIOR", 12, FontStyle.Bold, RoverUI.Dim);
+            var eyebrow = RoverUI.Label(side, RoverUI.Crumbs("ROOT", "ROVER", "INTERIOR"), 12, FontStyle.Bold, RoverUI.Dim);
             RoverUI.TopLeft(eyebrow.rectTransform, pad, pad, inner, 18);
-            var title = RoverUI.Label(side, "Cabin", 34, FontStyle.Bold, RoverUI.White);
+            var title = RoverUI.Label(side, "CABIN", 34, FontStyle.Bold, RoverUI.Accent);
             RoverUI.TopLeft(title.rectTransform, pad, pad + 24, inner, 44);
-            var sub = RoverUI.Label(side, "Refuel the rover from your inventory.", 14, FontStyle.Normal, RoverUI.Dim);
+            var sub = RoverUI.Label(side, "Refuel the rover from your inventory.", 13, FontStyle.Normal, RoverUI.Dim);
             RoverUI.TopLeft(sub.rectTransform, pad, pad + 72, inner, 20);
 
             float y = pad + 112;
-            var lbl = RoverUI.Label(side, "ROVER TANK", 12, FontStyle.Bold, RoverUI.Dim);
+            var lbl = RoverUI.Label(side, "ROVER_TANK", 13, FontStyle.Bold, RoverUI.Accent);
             RoverUI.TopLeft(lbl.rectTransform, pad, y, inner, 16);
             _gaugeText = RoverUI.Label(side, "", 12, FontStyle.Bold, RoverUI.White, mono: true);
             RoverUI.TopLeft(_gaugeText.rectTransform, pad, y, inner, 16);
-            _gaugeText.alignment = TextAnchor.UpperRight;
+            _gaugeText.alignment = TextAlignmentOptions.TopRight;
             _gaugeTrack = RoverUI.Bar(side, pad, y + 24, inner, 10, out _gaugeFill);
             y += 50;
             _reserveText = RoverUI.Label(side, "", 13, FontStyle.Normal, RoverUI.Dim, mono: true);
             RoverUI.TopLeft(_reserveText.rectTransform, pad, y, inner, 18);
             y += 34;
-            _statusText = RoverUI.Label(side, "", 15, FontStyle.Bold, RoverUI.White);
+            _statusText = RoverUI.Label(side, "", 14, FontStyle.Bold, RoverUI.White);
             RoverUI.TopLeft(_statusText.rectTransform, pad, y, inner, 44);
             y += 60;
 
@@ -198,7 +203,8 @@ namespace Bobery.Rover
             _hudButtons.Add(side, "LEAVE ROVER  [ ESC ]", pad, y, inner, 46, false, Leave);
 
             // Footer key hints
-            var hint = RoverUI.Label(side, "<b>I</b>  Inventory     <b>ESC</b>  Leave / close", 12, FontStyle.Normal, RoverUI.Dim, mono: true);
+            string acc = RoverUI.Hex(RoverUI.Accent);
+            var hint = RoverUI.Label(side, $"<color={acc}><b>[I]</b></color> Inventory    <color={acc}><b>[ESC]</b></color> Leave / close", 12, FontStyle.Normal, RoverUI.Dim, mono: true);
             hint.rectTransform.anchorMin = new Vector2(0, 0); hint.rectTransform.anchorMax = new Vector2(1, 0);
             hint.rectTransform.pivot = new Vector2(0, 0);
             hint.rectTransform.offsetMin = new Vector2(pad, pad); hint.rectTransform.offsetMax = new Vector2(-pad, pad + 20);
@@ -209,11 +215,11 @@ namespace Bobery.Rover
             _toast.pivot = new Vector2(0.5f, 0);
             _toast.anchoredPosition = new Vector2(200, 60);
             _toast.sizeDelta = new Vector2(320, 36);
-            RoverUI.Img(_toast, new Color(0, 0, 0, 0.85f));
-            RoverUI.Outline(_toast, new Color(1, 1, 1, 0.25f));
-            _toastText = RoverUI.Label(_toast, "", 14, FontStyle.Bold, RoverUI.White);
+            RoverUI.Img(_toast, RoverUI.Black);
+            RoverUI.Outline(_toast, RoverUI.Accent);
+            _toastText = RoverUI.Label(_toast, "", 14, FontStyle.Bold, RoverUI.Accent);
             RoverUI.Stretch(_toastText.rectTransform);
-            _toastText.alignment = TextAnchor.MiddleCenter;
+            _toastText.alignment = TextAlignmentOptions.Center;
             _toast.gameObject.SetActive(false);
 
             // Inventory lives on the same canvas, above everything.
@@ -234,23 +240,23 @@ namespace Bobery.Rover
             _invGroup = _inv.gameObject.AddComponent<CanvasGroup>();
             var dim = RoverUI.Rect("Dim", _inv);
             RoverUI.Stretch(dim);
-            RoverUI.Img(dim, new Color(0, 0, 0, 0.6f));
+            RoverUI.Img(dim, new Color(0, 0, 0, 0.7f));
 
             var card = RoverUI.Rect("Card", _inv);
             RoverUI.Center(card, w, h, 200f, 0f);
             RoverUI.Img(card, RoverUI.Black);
             RoverUI.Outline(card, RoverUI.Faint);
 
-            var eyebrow = RoverUI.Label(card, "PLAYER", 12, FontStyle.Bold, RoverUI.Dim);
+            var eyebrow = RoverUI.Label(card, RoverUI.Crumbs("ROOT", "PLAYER", "INVENTORY"), 12, FontStyle.Bold, RoverUI.Dim);
             RoverUI.TopLeft(eyebrow.rectTransform, 40, 32, 300, 16);
-            var title = RoverUI.Label(card, "Inventory", 30, FontStyle.Bold, RoverUI.White);
+            var title = RoverUI.Label(card, "INVENTORY", 30, FontStyle.Bold, RoverUI.Accent);
             RoverUI.TopLeft(title.rectTransform, 40, 50, 300, 40);
             var close = RoverUI.Rect("Close", card);
             close.anchorMin = close.anchorMax = new Vector2(1, 1);
             close.pivot = new Vector2(1, 1);
             close.anchoredPosition = new Vector2(-30, -30);
             close.sizeDelta = new Vector2(36, 36);
-            _invButtons.Wrap(close, "✕", false, () => SetInventoryOpen(false), 16);
+            _invButtons.Wrap(close, "×", false, () => SetInventoryOpen(false), 16);
 
             _slotGrid = RoverUI.Rect("Slots", card);
             RoverUI.TopLeft(_slotGrid, 40, 110, gridW, gridH);
@@ -268,11 +274,11 @@ namespace Bobery.Rover
             _detailDesc = RoverUI.Label(card, "", 13, FontStyle.Normal, RoverUI.Dim);
             RoverUI.TopLeft(_detailDesc.rectTransform, dx, 172, detailW, 60);
 
-            var tl = RoverUI.Label(card, "ROVER TANK", 11, FontStyle.Bold, RoverUI.Dim);
+            var tl = RoverUI.Label(card, "ROVER_TANK", 11, FontStyle.Bold, RoverUI.Accent);
             RoverUI.TopLeft(tl.rectTransform, dx, 240, detailW, 14);
             _invGaugeText = RoverUI.Label(card, "", 11, FontStyle.Bold, RoverUI.White, mono: true);
             RoverUI.TopLeft(_invGaugeText.rectTransform, dx, 240, detailW, 14);
-            _invGaugeText.alignment = TextAnchor.UpperRight;
+            _invGaugeText.alignment = TextAlignmentOptions.TopRight;
             _invGaugeTrack = RoverUI.Bar(card, dx, 260, detailW, 8, out _invGaugeFill);
 
             float bw = (detailW - 10f) / 2f;
@@ -296,19 +302,19 @@ namespace Bobery.Rover
                 RoverUI.TopLeft(slot, cx * (SlotSize + SlotGap), cy * (SlotSize + SlotGap), SlotSize, SlotSize);
                 bool has = i < ids.Count;
                 bool sel = has && ids[i] == _selected;
-                RoverUI.Img(slot, sel ? new Color(1, 1, 1, 0.14f) : RoverUI.Ghost);
-                RoverUI.Outline(slot, sel ? RoverUI.White : RoverUI.Faint, sel ? 2f : 1f);
+                RoverUI.Img(slot, sel ? RoverUI.A(RoverUI.Accent, 0.12f) : RoverUI.Ghost);
+                RoverUI.Outline(slot, sel ? RoverUI.Accent : RoverUI.Faint, sel ? 2f : 1f);
                 if (!has) continue;
 
                 string id = ids[i];
                 var icon = RoverUI.Rect("Icon", slot);
                 RoverUI.Center(icon, 30, 40, 0, 10);
-                RoverUI.Img(icon, RoverUI.White);
+                RoverUI.Img(icon, RoverUI.Accent);
                 var capRt = RoverUI.Rect("Cap", icon);
                 capRt.anchorMin = capRt.anchorMax = new Vector2(0.7f, 1f);
                 capRt.pivot = new Vector2(0.5f, 0f);
                 capRt.sizeDelta = new Vector2(8, 6);
-                RoverUI.Img(capRt, RoverUI.White);
+                RoverUI.Img(capRt, RoverUI.Accent);
 
                 var name = RoverUI.Label(slot, PlayerInventory.NameOf(id).ToUpperInvariant(), 10, FontStyle.Bold, RoverUI.Dim);
                 RoverUI.TopLeft(name.rectTransform, 8, 6, SlotSize - 16, 14);
@@ -316,7 +322,7 @@ namespace Bobery.Rover
                 amt.rectTransform.anchorMin = new Vector2(0, 0); amt.rectTransform.anchorMax = new Vector2(1, 0);
                 amt.rectTransform.pivot = new Vector2(0.5f, 0);
                 amt.rectTransform.offsetMin = new Vector2(6, 6); amt.rectTransform.offsetMax = new Vector2(-6, 22);
-                amt.alignment = TextAnchor.LowerCenter;
+                amt.alignment = TextAlignmentOptions.Bottom;
 
                 _slotRects.Add((slot, id));
             }
@@ -327,13 +333,13 @@ namespace Bobery.Rover
         {
             if (_selected == null)
             {
-                _detailName.text = "Empty";
+                _detailName.text = "EMPTY";
                 _detailAmount.text = "";
                 _detailDesc.text = "Nothing in your inventory. Collect fuel on the map.";
             }
             else
             {
-                _detailName.text = PlayerInventory.NameOf(_selected);
+                _detailName.text = PlayerInventory.NameOf(_selected).ToUpperInvariant();
                 _detailAmount.text = $"{PlayerInventory.Get(_selected):0.#} {PlayerInventory.UnitOf(_selected)}";
                 _detailDesc.text = PlayerInventory.DescriptionOf(_selected);
             }
@@ -403,15 +409,20 @@ namespace Bobery.Rover
             _invGaugeText.text = g;
             RoverUI.SetBar(_gaugeTrack, _gaugeFill, fuel / cap);
             RoverUI.SetBar(_invGaugeTrack, _invGaugeFill, fuel / cap);
-            _reserveText.text = $"Carried fuel   {FuelTank.Reserve:0.#} L";
+            _reserveText.text = $"CARRIED FUEL   {FuelTank.Reserve:0.#} L";
+            Color barC = !_tank ? RoverUI.Faint : _tank.IsLow || _tank.IsEmpty ? RoverUI.Red : fuel / cap < 0.5f ? RoverUI.Yellow : RoverUI.Accent;
+            _gaugeFill.GetComponent<Image>().color = barC;
+            _invGaugeFill.GetComponent<Image>().color = barC;
 
             if (!_tank) _statusText.text = "";
-            else if (_tank.IsEmpty && FuelTank.Reserve > 0f) _statusText.text = "Tank empty. Open the inventory (I) and pour fuel in.";
-            else if (_tank.IsLow) _statusText.text = "Fuel low.";
-            else _statusText.text = "Ready to go.";
+            else if (_tank.IsEmpty && FuelTank.Reserve > 0f) _statusText.text = Tag("ERR ", RoverUI.Red, "Tank empty. Open the inventory (I) and pour fuel in.");
+            else if (_tank.IsLow) _statusText.text = Tag("WARN", RoverUI.Yellow, "Fuel low.");
+            else _statusText.text = Tag("OKAY", RoverUI.Green, "Ready to go.");
 
             if (_invOpen) UpdateDetails();
         }
+
+        static string Tag(string tag, Color c, string msg) => $"<color={RoverUI.Hex(c)}>[{tag}]</color> {msg}";
 
         void AnimateRoom()
         {

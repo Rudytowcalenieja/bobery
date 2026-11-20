@@ -11,11 +11,15 @@ using UnityEngine.UI;
 /// </summary>
 public static class UIKit
 {
-    public static readonly Color DimColor = new Color(0f, 0f, 0f, 0.6f);
-    public static readonly Color PanelColor = new Color(0.09f, 0.11f, 0.15f, 0.97f);
-    public static readonly Color ButtonColor = new Color(0.20f, 0.45f, 0.75f, 1f);
-    public static readonly Color AccentColor = new Color(0.95f, 0.65f, 0.15f, 1f);
-    public static readonly Color SubtleColor = new Color(1f, 1f, 1f, 0.08f);
+    // Terminal palette (same as Bobery.Rover.RoverUI).
+    public static readonly Color DimColor = new Color(0f, 0f, 0f, 0.7f);
+    public static readonly Color PanelColor = new Color32(10, 11, 13, 250);
+    public static readonly Color ButtonColor = new Color32(125, 211, 252, 255);
+    public static readonly Color AccentColor = new Color32(125, 211, 252, 255);
+    public static readonly Color SubtleColor = new Color32(18, 20, 24, 255);
+    public static readonly Color TextColor = new Color32(228, 231, 235, 255);
+    public static readonly Color ButtonTextColor = new Color32(6, 8, 10, 255);
+    public static readonly Color TrackColor = new Color32(46, 50, 56, 255);
 
     // ---------- EventSystem (wymagany, żeby działały przyciski) ----------
 
@@ -126,10 +130,11 @@ public static class UIKit
     {
         RectTransform rt = CreateRect("Text", parent);
         var tmp = rt.gameObject.AddComponent<TextMeshProUGUI>();
+        tmp.font = Bobery.Rover.RoverUI.Tmp;
         tmp.text = text;
         tmp.fontSize = fontSize;
         tmp.alignment = align;
-        tmp.color = Color.white;
+        tmp.color = TextColor;
         tmp.raycastTarget = false;
 
         var le = rt.gameObject.AddComponent<LayoutElement>();
@@ -144,12 +149,18 @@ public static class UIKit
         Image img = CreateImage(parent, "Button_" + label, ButtonColor);
         var button = img.gameObject.AddComponent<Button>();
         button.targetGraphic = img;
+        var colors = button.colors;
+        colors.highlightedColor = new Color(1.25f, 1.25f, 1.25f, 1f);
+        colors.disabledColor = new Color(0.4f, 0.4f, 0.4f, 0.5f);
+        button.colors = colors;
 
         var le = img.gameObject.AddComponent<LayoutElement>();
         le.preferredHeight = height;
         le.flexibleWidth = 1f;
 
-        TextMeshProUGUI t = CreateText(img.transform, label, fontSize);
+        TextMeshProUGUI t = CreateText(img.transform, label.ToUpperInvariant(), fontSize);
+        t.color = ButtonTextColor;
+        t.fontStyle = FontStyles.Bold;
         Stretch(t.rectTransform);
 
         if (onClick != null) button.onClick.AddListener(() => onClick());
@@ -165,7 +176,7 @@ public static class UIKit
     /// <summary>Pasek postępu. Wypełnienie ustawiasz przez SetBar(fill, 0..1).</summary>
     public static (RectTransform root, RectTransform fill) CreateBar(Transform parent, float height = 30f)
     {
-        Image bg = CreateImage(parent, "Bar", new Color(1f, 1f, 1f, 0.12f));
+        Image bg = CreateImage(parent, "Bar", TrackColor);
         bg.gameObject.AddComponent<LayoutElement>().preferredHeight = height;
 
         Image fill = CreateImage(bg.transform, "Fill", AccentColor);

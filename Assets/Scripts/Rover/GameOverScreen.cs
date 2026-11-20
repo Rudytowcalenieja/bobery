@@ -1,3 +1,4 @@
+using TMPro;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.SceneManagement;
@@ -37,22 +38,22 @@ namespace Bobery.Rover
 
             var dim = RoverUI.Rect("Dim", canvas.transform);
             RoverUI.Stretch(dim);
-            RoverUI.Img(dim, new Color(0, 0, 0, 0.82f));
+            RoverUI.Img(dim, new Color(0, 0, 0, 0.88f));
 
             _card = RoverUI.Rect("Card", canvas.transform);
             RoverUI.Center(_card, 560, 300);
             RoverUI.Img(_card, RoverUI.Black);
-            RoverUI.Outline(_card, RoverUI.Faint);
+            RoverUI.Outline(_card, RoverUI.Red);
 
-            var eyebrow = RoverUI.Label(_card, "MISSION FAILED", 12, FontStyle.Bold, RoverUI.Dim);
+            var eyebrow = RoverUI.Label(_card, $"<color={RoverUI.Hex(RoverUI.Red)}>[ERR ]</color> MISSION FAILED", 12, FontStyle.Bold, RoverUI.Dim);
             RoverUI.TopLeft(eyebrow.rectTransform, 40, 40, 480, 18);
-            var t = RoverUI.Label(_card, title, 44, FontStyle.Bold, RoverUI.White);
+            var t = RoverUI.Label(_card, title.ToUpperInvariant(), 40, FontStyle.Bold, RoverUI.Red);
             RoverUI.TopLeft(t.rectTransform, 40, 62, 480, 56);
-            var r = RoverUI.Label(_card, reason, 16, FontStyle.Normal, RoverUI.Dim);
+            var r = RoverUI.Label(_card, "> " + reason, 15, FontStyle.Normal, RoverUI.Dim);
             RoverUI.TopLeft(r.rectTransform, 40, 126, 480, 50);
 
             _buttons.Add(_card, "RESTART", 40, 210, 230, 48, true, Restart);
-            _buttons.Add(_card, "QUIT", 290, 210, 230, 48, false, Quit);
+            _buttons.Add(_card, "QUIT", 290, 210, 230, 48, false, Quit).tone = RoverUI.Red;
         }
 
         void Update()

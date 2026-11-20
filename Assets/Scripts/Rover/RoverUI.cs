@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using TMPro;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.UI;
@@ -22,18 +23,122 @@ namespace Bobery.Rover
     /// </summary>
     public static class RoverUI
     {
-        public static readonly Color Black = new Color(0.03f, 0.03f, 0.035f, 0.97f);
-        public static readonly Color White = Color.white;
-        public static readonly Color Dim = new Color(1f, 1f, 1f, 0.45f);
-        public static readonly Color Faint = new Color(1f, 1f, 1f, 0.12f);
-        public static readonly Color Ghost = new Color(1f, 1f, 1f, 0.05f);
+        // Terminal palette: near-black panels, thin grey rules, cyan accent, status colours.
+        public static readonly Color Black = new Color32(10, 11, 13, 250);    // panel background
+        public static readonly Color White = new Color32(228, 231, 235, 255); // primary text
+        public static readonly Color Dim = new Color32(138, 144, 153, 255);   // muted text
+        public static readonly Color Faint = new Color32(46, 50, 56, 255);    // borders / rules / tracks
+        public static readonly Color Ghost = new Color32(18, 20, 24, 255);    // raised surface (cards, slots)
+        public static readonly Color Accent = new Color32(125, 211, 252, 255); // cyan
+        public static readonly Color Green = new Color32(74, 222, 128, 255);
+        public static readonly Color Yellow = new Color32(232, 240, 106, 255);
+        public static readonly Color Red = new Color32(240, 82, 82, 255);
+        public static readonly Color Purple = new Color32(167, 139, 250, 255);
+        public static readonly Color OnAccent = new Color32(6, 8, 10, 255);   // text on a filled accent
 
         static Font _font, _mono;
         static Sprite _circle;
 
-        public static Font Font => _font ? _font : _font = Font.CreateDynamicFontFromOSFont(new[] { "Segoe UI", "Helvetica Neue", "Arial" }, 16)
-                                                           ?? Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-        public static Font Mono => _mono ? _mono : _mono = Font.CreateDynamicFontFromOSFont(new[] { "Consolas", "Menlo", "Courier New" }, 16) ?? Font;
+        static readonly string[] MonoFonts = { "Consolas", "Menlo", "Courier New" };
+
+        // Terminal look: everything is monospace (Consolas).
+        public static Font Mono => _mono ? _mono : _mono = LoadMono();
+        public static Font Font => _font ? _font : _font = Mono;
+
+        /// <summary>First installed font from <see cref="MonoFonts"/>, loaded on its own (no fallback list) so Unity can't pick another one.</summary>
+        static Font LoadMono()
+        {
+            var installed = new HashSet<string>(Font.GetOSInstalledFontNames(), StringComparer.OrdinalIgnoreCase);
+            foreach (var name in MonoFonts)
+            {
+                if (!installed.Contains(name)) continue;
+                var f = Font.CreateDynamicFontFromOSFont(name, 16);
+                if (f) { f.name = name; Debug.Log($"[RoverUI] UI font: {name}"); return f; }
+            }
+            Debug.LogWarning("[RoverUI] No monospace OS font found, using Unity's default font.");
+            return Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        }
+
+        static TMP_FontAsset _tmp;
+        static Material _shadowMat;
+
+        /// <summary>
+        /// Consolas as a TextMesh Pro signed-distance-field font, built at runtime from the OS font file.
+        /// SDF text stays sharp at any canvas scale (the legacy Text component blurs small text).
+        /// </summary>
+        public static TMP_FontAsset Tmp => _tmp ? _tmp : _tmp = LoadTmp();
+
+        static TMP_FontAsset LoadTmp()
+        {
+            TMP_FontAsset fa = null;
+            foreach (var name in MonoFonts)
+            {
+                fa = TMP_FontAsset.CreateFontAsset(name, "Regular");
+                if (!fa) continue;
+                fa.name = name + " SDF";
+                var bold = TMP_FontAsset.CreateFontAsset(name, "Bold");
+                if (bold)
+                {
+                    bold.name = name + " Bold SDF";
+                    fa.fontWeightTable[7].regularTypeface = bold; // real bold face instead of faux bold
+                }
+                Debug.Log($"[RoverUI] UI font: {name} (TextMesh Pro SDF)");
+                break;
+            }
+            if (!fa)
+            {
+                Debug.LogWarning("[RoverUI] No monospace OS font found, using TextMesh Pro's default font.");
+                return TMP_Settings.defaultFontAsset;
+            }
+
+            // Symbols Consolas lacks (arrows, ✕ ...) come from Windows' symbol fonts.
+            var fallbacks = new List<TMP_FontAsset>();
+            foreach (var fb in new[] { "Segoe UI Symbol", "Segoe UI" })
+            {
+                var f = TMP_FontAsset.CreateFontAsset(fb, "Regular");
+                if (f) fallbacks.Add(f);
+            }
+            if (TMP_Settings.defaultFontAsset) fallbacks.Add(TMP_Settings.defaultFontAsset);
+            fa.fallbackFontAssetTable = fallbacks;
+            return fa;
+        }
+
+        /// <summary>Dark drop shadow under the text (for labels drawn over the map).</summary>
+        public static void Shadowed(TMP_Text t)
+        {
+            if (!_shadowMat)
+            {
+                _shadowMat = new Material(Tmp.material) { name = Tmp.name + " Shadow" };
+                _shadowMat.EnableKeyword(ShaderUtilities.Keyword_Underlay);
+                _shadowMat.SetColor(ShaderUtilities.ID_UnderlayColor, new Color(0f, 0f, 0f, 0.9f));
+                _shadowMat.SetFloat(ShaderUtilities.ID_UnderlayOffsetX, 0.5f);
+                _shadowMat.SetFloat(ShaderUtilities.ID_UnderlayOffsetY, -0.5f);
+                _shadowMat.SetFloat(ShaderUtilities.ID_UnderlaySoftness, 0.3f);
+            }
+            if (t.font == Tmp) t.fontSharedMaterial = _shadowMat;
+        }
+
+        // Domain reload is disabled in this project, so statics survive between play sessions: reset the font cache.
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        static void ResetFonts() { _font = null; _mono = null; }
+
+        /// <summary>Colour with a different alpha.</summary>
+        public static Color A(Color c, float a) { c.a = a; return c; }
+
+        /// <summary>"#rrggbb" for rich-text tags.</summary>
+        public static string Hex(Color c) => "#" + ColorUtility.ToHtmlStringRGB(c);
+
+        /// <summary>Breadcrumb like "ROOT / ROVER / NAVIGATION" with the last part highlighted.</summary>
+        public static string Crumbs(params string[] parts)
+        {
+            var sb = new System.Text.StringBuilder();
+            for (int i = 0; i < parts.Length; i++)
+            {
+                if (i > 0) sb.Append(" <color=").Append(Hex(Faint)).Append(">/</color> ");
+                sb.Append(i == parts.Length - 1 ? $"<color={Hex(White)}>{parts[i]}</color>" : parts[i]);
+            }
+            return sb.ToString();
+        }
 
         public static Canvas NewCanvas(string name, Transform parent, int sortingOrder)
         {
@@ -64,19 +169,21 @@ namespace Bobery.Rover
             return img;
         }
 
-        public static Text Label(Transform parent, string text, int size, FontStyle style, Color color, bool mono = false)
+        public static TextMeshProUGUI Label(Transform parent, string text, int size, FontStyle style, Color color, bool mono = false)
         {
             var rt = Rect("Text", parent);
-            var t = rt.gameObject.AddComponent<Text>();
-            t.font = mono ? Mono : Font;
-            t.text = text;
+            var t = rt.gameObject.AddComponent<TextMeshProUGUI>();
+            t.font = Tmp;
             t.fontSize = size;
-            t.fontStyle = style;
+            t.fontStyle = style == FontStyle.Bold ? FontStyles.Bold
+                        : style == FontStyle.Italic ? FontStyles.Italic
+                        : style == FontStyle.BoldAndItalic ? FontStyles.Bold | FontStyles.Italic : FontStyles.Normal;
             t.color = color;
             t.raycastTarget = false;
-            t.supportRichText = true;
-            t.horizontalOverflow = HorizontalWrapMode.Wrap;
-            t.verticalOverflow = VerticalWrapMode.Overflow;
+            t.richText = true;
+            t.textWrappingMode = TextWrappingModes.Normal;
+            t.overflowMode = TextOverflowModes.Overflow;
+            t.text = text;
             return t;
         }
 
@@ -102,20 +209,46 @@ namespace Bobery.Rover
             rt.offsetMin = new Vector2(inset, inset); rt.offsetMax = new Vector2(-inset, -inset);
         }
 
-        public static void Outline(RectTransform rt, Color c, float t = 1f)
+        public static Image[] Outline(RectTransform rt, Color c, float t = 1f)
         {
-            void Edge(string n, Vector2 aMin, Vector2 aMax, Vector2 size)
+            Image Edge(string n, Vector2 aMin, Vector2 aMax, Vector2 size)
             {
                 var e = Rect(n, rt);
                 e.anchorMin = aMin; e.anchorMax = aMax;
                 e.pivot = new Vector2(0.5f, 0.5f);
                 e.sizeDelta = size; e.anchoredPosition = Vector2.zero;
-                Img(e, c);
+                return Img(e, c);
             }
-            Edge("T", new Vector2(0, 1), new Vector2(1, 1), new Vector2(0, t));
-            Edge("B", new Vector2(0, 0), new Vector2(1, 0), new Vector2(0, t));
-            Edge("L", new Vector2(0, 0), new Vector2(0, 1), new Vector2(t, 0));
-            Edge("R", new Vector2(1, 0), new Vector2(1, 1), new Vector2(t, 0));
+            return new[]
+            {
+                Edge("T", new Vector2(0, 1), new Vector2(1, 1), new Vector2(0, t)),
+                Edge("B", new Vector2(0, 0), new Vector2(1, 0), new Vector2(0, t)),
+                Edge("L", new Vector2(0, 0), new Vector2(0, 1), new Vector2(t, 0)),
+                Edge("R", new Vector2(1, 0), new Vector2(1, 1), new Vector2(t, 0)),
+            };
+        }
+
+        public static void SetOutline(Image[] edges, Color c)
+        {
+            if (edges == null) return;
+            foreach (var e in edges) if (e) e.color = c;
+        }
+
+        /// <summary>Panel header: accent title (e.g. "ROVER_TANK") with a rule underneath. Returns the y below it.</summary>
+        public static float Header(RectTransform parent, string title, float x, float y, float w, string right = null)
+        {
+            var t = Label(parent, title, 14, FontStyle.Bold, Accent);
+            TopLeft(t.rectTransform, x, y, w, 20);
+            if (right != null)
+            {
+                var r = Label(parent, right, 11, FontStyle.Normal, Dim);
+                TopLeft(r.rectTransform, x, y + 2, w, 18);
+                r.alignment = TextAlignmentOptions.TopRight;
+            }
+            var rule = Rect("Rule", parent);
+            TopLeft(rule, x, y + 28, w, 1);
+            Img(rule, Faint);
+            return y + 40;
         }
 
         /// <summary>Horizontal bar; returns the fill image (set its rectTransform width via SetBar).</summary>
@@ -127,7 +260,7 @@ namespace Bobery.Rover
             fill = Rect("Fill", track);
             fill.anchorMin = new Vector2(0, 0); fill.anchorMax = new Vector2(0, 1);
             fill.pivot = new Vector2(0, 0.5f); fill.sizeDelta = Vector2.zero;
-            Img(fill, White);
+            Img(fill, Accent);
             return track;
         }
 
@@ -163,10 +296,12 @@ namespace Bobery.Rover
         {
             public RectTransform rt;
             public Image bg;
-            public Text label;
+            public Image[] edges;
+            public TextMeshProUGUI label;
             public Action onClick;
             public bool filled;
             public bool enabled = true;
+            public Color tone = RoverUI.Accent; // fill colour of a filled button, highlight on hover
         }
 
         readonly List<Button> _buttons = new List<Button>();
@@ -180,14 +315,37 @@ namespace Bobery.Rover
 
         public Button Wrap(RectTransform rt, string text, bool filled, Action onClick, int fontSize = 13)
         {
-            var bg = RoverUI.Img(rt, filled ? RoverUI.White : new Color(0, 0, 0, 0.55f));
-            RoverUI.Outline(rt, new Color(1, 1, 1, 0.6f));
-            var label = RoverUI.Label(rt, text, fontSize, FontStyle.Bold, filled ? Color.black : RoverUI.White);
+            var bg = RoverUI.Img(rt, Color.clear);
+            var edges = RoverUI.Outline(rt, RoverUI.Faint);
+            var label = RoverUI.Label(rt, text, fontSize, FontStyle.Bold, RoverUI.White);
             RoverUI.Stretch(label.rectTransform);
-            label.alignment = TextAnchor.MiddleCenter;
-            var b = new Button { rt = rt, bg = bg, label = label, onClick = onClick, filled = filled };
+            label.alignment = TextAlignmentOptions.Center;
+            var b = new Button { rt = rt, bg = bg, edges = edges, label = label, onClick = onClick, filled = filled };
+            Paint(b, false);
             _buttons.Add(b);
             return b;
+        }
+
+        public static void Paint(Button b, bool hover) => Paint(b.bg, b.edges, b.label, b.filled, b.enabled, hover, b.tone);
+
+        /// <summary>Terminal button look. Filled: solid tone with dark text. Outline: dark with a grey border; hover lights it in the tone.</summary>
+        public static void Paint(Image bg, Image[] edges, TextMeshProUGUI label, bool filled, bool enabled, bool hover, Color tone)
+        {
+            float a = enabled ? 1f : 0.3f;
+            hover &= enabled;
+            if (filled)
+            {
+                Color c = RoverUI.A(hover ? Color.Lerp(tone, Color.white, 0.35f) : tone, a);
+                bg.color = c;
+                RoverUI.SetOutline(edges, c);
+                label.color = RoverUI.A(RoverUI.OnAccent, a);
+            }
+            else
+            {
+                bg.color = hover ? RoverUI.A(tone, 0.12f) : RoverUI.A(RoverUI.Black, 0.85f * a);
+                RoverUI.SetOutline(edges, hover ? tone : RoverUI.A(RoverUI.Faint, a));
+                label.color = hover ? tone : RoverUI.A(RoverUI.White, a);
+            }
         }
 
         /// <summary>Updates hover colours and fires clicks. Returns true if the mouse is over any button.</summary>
@@ -198,17 +356,16 @@ namespace Bobery.Rover
             Vector2 screen = mouse.position.ReadValue();
             bool click = mouse.leftButton.wasPressedThisFrame;
             bool over = false;
+            Action clicked = null;
             foreach (var b in _buttons)
             {
                 if (!b.rt || !b.rt.gameObject.activeInHierarchy) continue;
                 bool hover = b.enabled && RectTransformUtility.RectangleContainsScreenPoint(b.rt, screen, null);
                 over |= hover;
-                bool light = b.filled != hover;
-                float a = b.enabled ? 1f : 0.3f;
-                b.bg.color = light ? new Color(1, 1, 1, a) : new Color(0, 0, 0, 0.55f);
-                b.label.color = light ? new Color(0, 0, 0, a) : new Color(1, 1, 1, a);
-                if (hover && click) b.onClick?.Invoke();
+                Paint(b, hover);
+                if (hover && click) clicked = b.onClick;
             }
+            clicked?.Invoke(); // after the loop: a click may add/remove buttons
             return over;
         }
     }

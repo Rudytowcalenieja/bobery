@@ -117,6 +117,7 @@ namespace Bobery.Rover.EditorTools
             Undo.RecordObject(panel, "Assign rover");
             panel.rover = rover;
             panel.terrain = Object.FindAnyObjectByType<Bobery.Terrain.TerrainGenerator>();
+            if (!panel.beaconModel) panel.beaconModel = AssetDatabase.LoadAssetAtPath<GameObject>(RoverMapPanel.BeaconModelPath);
 
             Undo.RecordObject(rover, "Set arrive distance");
             rover.arriveDistance = Mathf.Max(1.5f, footprint * 0.75f);

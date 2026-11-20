@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using TMPro;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.UI;
@@ -58,13 +59,32 @@ namespace Bobery.Rover
         [Min(0f)] public float beaconChargePerSecond = 4f;
         [Tooltip("Seconds a beacon needs after a charging session before it can charge again (300 = 5 min).")]
         [Min(0f)] public float beaconCooldown = 300f;
+        [Tooltip("Seconds it takes to pick a beacon up; the rover must stay in its zone meanwhile (0 = instant).")]
+        [Min(0f)] public float beaconPickUpTime = 10f;
+        [Tooltip("3D model for placed beacons (Assets/Models/beacon.fbx). Empty → a primitive stand-in.")]
+        public GameObject beaconModel;
+
+#if UNITY_EDITOR
+        public const string BeaconModelPath = "Assets/Models/beacon.fbx";
+        void Reset() => FindBeaconModel();
+        void OnValidate() => FindBeaconModel();
+        void FindBeaconModel()
+        {
+            if (!beaconModel) beaconModel = UnityEditor.AssetDatabase.LoadAssetAtPath<GameObject>(BeaconModelPath);
+        }
+#endif
 
         // ---- theme
-        static readonly Color Black = new Color(0.03f, 0.03f, 0.035f, 0.97f);
-        static readonly Color White = Color.white;
-        static readonly Color Dim = new Color(1f, 1f, 1f, 0.45f);
-        static readonly Color Faint = new Color(1f, 1f, 1f, 0.12f);
-        static readonly Color Ghost = new Color(1f, 1f, 1f, 0.05f);
+        static Color Black => RoverUI.Black;
+        static Color White => RoverUI.White;
+        static Color Dim => RoverUI.Dim;
+        static Color Faint => RoverUI.Faint;
+        static Color Ghost => RoverUI.Ghost;
+        static Color Accent => RoverUI.Accent;
+        static Color Green => RoverUI.Green;
+        static Color Yellow => RoverUI.Yellow;
+        static Color Red => RoverUI.Red;
+        static Color A(Color c, float a) => RoverUI.A(c, a);
 
         const float Pad = 24f;
 
@@ -76,10 +96,11 @@ namespace Bobery.Rover
         readonly List<RectTransform> _joints = new List<RectTransform>();
         Texture2D _dashTex;
         Sprite _jointSprite;
-        Text _stateText, _hoverText, _toastText, _coordText, _scaleText, _progressText;
+        TextMeshProUGUI _stateText, _hoverText, _toastText, _coordText, _scaleText, _progressText;
         Image _stateDot, _toastBg, _progressFill;
+        Image[] _pillEdges, _toastEdges;
         RectTransform _scaleBar, _toast;
-        Text _speedVal, _headingVal, _distVal, _etaVal;
+        TextMeshProUGUI _speedVal, _headingVal, _distVal, _etaVal;
         readonly List<Btn> _buttons = new List<Btn>();
         Font _font, _mono;
 
@@ -97,24 +118,24 @@ namespace Bobery.Rover
         FuelTank _tank;
         RectTransform _fuelTrack, _fuelFill;
         Image _fuelFillImg;
-        Text _fuelValue, _fuelInfo, _fuelLabel;
+        TextMeshProUGUI _fuelValue, _fuelInfo, _fuelLabel;
         float _fuelFlash;
 
         // ---- battery
         RoverBattery _battery;
         RectTransform _batTrack, _batFill, _noSignal, _batAlert;
         Image _batFillImg, _batAlertBg;
-        Text _batValue, _batLabel, _batAlertText;
+        TextMeshProUGUI _batValue, _batLabel, _batAlertText;
         RawImage _mapImage;
         float _batFlash;
 
         // ---- beacons
-        class BeaconMark { public RectTransform rt, zone, icon; public Image zoneImg, ringImg, iconImg; public Text label; }
-        class Slot { public RectTransform rt, barTrack, bar; public Image bg, glyph, barImg; public Text cross, timer; }
+        class BeaconMark { public RectTransform rt, zone, icon; public Image zoneImg, ringImg, iconImg; public TextMeshProUGUI label; }
+        class Slot { public RectTransform rt, barTrack, bar; public Image bg, glyph, barImg; public TextMeshProUGUI cross, timer; }
         readonly List<BeaconMark> _beaconMarks = new List<BeaconMark>();
         readonly List<Slot> _slots = new List<Slot>();
         RectTransform _beaconRoot, _placeGhost, _beaconActions;
-        Text _beaconCount, _beaconInfo;
+        TextMeshProUGUI _beaconCount, _beaconInfo;
         Btn _pickUpBtn, _destroyBtn;
         bool _placing;
         Beacon _selected, _hoverBeacon;
@@ -130,9 +151,11 @@ namespace Bobery.Rover
         {
             public RectTransform rt;
             public Image bg;
-            public Text label;
+            public Image[] edges;
+            public TextMeshProUGUI label;
             public Action onClick;
-            public bool filled;   // filled = white button with black text
+            public Color tone = RoverUI.Accent;
+            public bool filled;   // filled = solid accent button with dark text
             public bool enabled = true;
         }
 
@@ -146,14 +169,18 @@ namespace Bobery.Rover
                 ? terrain.transform.position.y + terrain.waterLevel * terrain.transform.lossyScale.y
                 : fallbackWaterLevel;
 
-            _font = Font.CreateDynamicFontFromOSFont(new[] { "Segoe UI", "Helvetica Neue", "Arial" }, 16)
-                    ?? Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-            _mono = Font.CreateDynamicFontFromOSFont(new[] { "Consolas", "Menlo", "Courier New" }, 16) ?? _font;
+            _font = RoverUI.Font;
+            _mono = RoverUI.Mono;
 
             // Renderers on this layer are skipped by the map camera (rover model + 3D marker).
             _hiddenLayer = LayerMask.NameToLayer("TransparentFX");
             if (_hiddenLayer < 0) _hiddenLayer = 1;
 
+#if UNITY_EDITOR
+            FindBeaconModel();
+#endif
+            BeaconNetwork.Model = beaconModel;
+            BeaconNetwork.PickUpTime = beaconPickUpTime;
             BeaconNetwork.Configure(beaconCount, beaconFuelCostPercent / 100f, beaconBatteryCostPercent / 100f,beaconRadius, beaconChargePerSecond, beaconCooldown);
 
             BuildMapCamera();
@@ -270,29 +297,29 @@ namespace Bobery.Rover
             float y = Pad;
 
             // ---- Header
-            var eyebrow = Label(_panel, "ROVER  /  NAVIGATION", 12, FontStyle.Bold, Dim);
+            var eyebrow = Label(_panel, RoverUI.Crumbs("ROOT", "ROVER", "NAVIGATION"), 12, FontStyle.Bold, Dim);
             TopLeft(eyebrow.rectTransform, Pad, y, inner, 18);
 
             var pill = NewRect("StatePill", _panel);
             TopRight(pill, Pad, y - 4, 118, 26);
-            Img(pill, Ghost);
-            Outline(pill, Faint, 1);
-            _stateDot = Img(NewRect("Dot", pill), White);
+            Img(pill, Black);
+            _pillEdges = Outline(pill, Accent, 1);
+            _stateDot = Img(NewRect("Dot", pill), Accent);
             _stateDot.sprite = Circle(32, 0f);
             var dotRt = _stateDot.rectTransform;
             dotRt.anchorMin = dotRt.anchorMax = new Vector2(0, 0.5f);
             dotRt.anchoredPosition = new Vector2(14, 0); dotRt.sizeDelta = new Vector2(8, 8);
-            _stateText = Label(pill, "IDLE", 12, FontStyle.Bold, White, _mono);
+            _stateText = Label(pill, "IDLE", 12, FontStyle.Bold, Accent, _mono);
             var stRt = _stateText.rectTransform;
             stRt.anchorMin = new Vector2(0, 0); stRt.anchorMax = new Vector2(1, 1);
             stRt.offsetMin = new Vector2(26, 0); stRt.offsetMax = new Vector2(-8, 0);
-            _stateText.alignment = TextAnchor.MiddleLeft;
+            _stateText.alignment = TextAlignmentOptions.Left;
 
             y += 24;
-            var title = Label(_panel, "Navigation", 34, FontStyle.Bold, White);
+            var title = Label(_panel, "NAVIGATION", 34, FontStyle.Bold, Accent);
             TopLeft(title.rectTransform, Pad, y, inner, 44);
             y += 48;
-            var sub = Label(_panel, "Select a point on the map to dispatch the rover.", 14, FontStyle.Normal, Dim);
+            var sub = Label(_panel, "Select a point on the map to dispatch the rover.", 13, FontStyle.Normal, Dim);
             TopLeft(sub.rectTransform, Pad, y, inner, 20);
             y += 34;
 
@@ -319,12 +346,12 @@ namespace Bobery.Rover
             Section("ROUTE", y, inner);
             _progressText = Label(_panel, "—", 12, FontStyle.Bold, Dim, _mono);
             TopLeft(_progressText.rectTransform, Pad, y, inner, 16);
-            _progressText.alignment = TextAnchor.UpperRight;
+            _progressText.alignment = TextAlignmentOptions.TopRight;
             y += 24;
             var track = NewRect("ProgressTrack", _panel);
             TopLeft(track, Pad, y, inner, 4);
             Img(track, Faint);
-            _progressFill = Img(NewRect("Fill", track), White);
+            _progressFill = Img(NewRect("Fill", track), Accent);
             var fRt = _progressFill.rectTransform;
             fRt.anchorMin = new Vector2(0, 0); fRt.anchorMax = new Vector2(0, 1);
             fRt.pivot = new Vector2(0, 0.5f); fRt.sizeDelta = Vector2.zero;
@@ -332,11 +359,11 @@ namespace Bobery.Rover
 
             // ---- Actions
             float bw = (inner - gap) / 2f;
-            AddButton("STOP", Pad, y, bw, 46, filled: true, () =>
+            AddButton("STOP", Pad, y, bw, 46, filled: false, () =>
             {
                 if (rover && rover.HasDestination) { rover.Stop(); Toast("Rover stopped"); }
             });
-            AddButton("ENTER ROVER  [E]", Pad + bw + gap, y, bw, 46, filled: false, RoverInterior.Enter);
+            AddButton("ENTER ROVER [E]", Pad + bw + gap, y, bw, 46, filled: true, RoverInterior.Enter);
 
             // ---- Footer (pinned to bottom)
             var footer = NewRect("Footer", _panel);
@@ -372,24 +399,24 @@ namespace Bobery.Rover
             TopLeft(_batLabel.rectTransform, 0, 0, inner, 16);
             _batValue = Label(block, "", 13, FontStyle.Bold, White, _mono);
             TopLeft(_batValue.rectTransform, 0, -2, inner, 18);
-            _batValue.alignment = TextAnchor.UpperRight;
+            _batValue.alignment = TextAlignmentOptions.TopRight;
 
             _batTrack = NewRect("Track", block);
             TopLeft(_batTrack, 0, 22, inner, 10);
-            Img(_batTrack, Faint);
-            Outline(_batTrack, new Color(1, 1, 1, 0.25f), 1);
+            Img(_batTrack, Ghost);
+            Outline(_batTrack, Faint, 1);
             for (int i = 1; i < 10; i++) // cell segments
             {
                 var t = NewRect("Cell", _batTrack);
                 t.anchorMin = t.anchorMax = new Vector2(i / 10f, 0.5f);
                 t.sizeDelta = new Vector2(2, 10);
-                Img(t, new Color(0, 0, 0, 0.75f));
+                Img(t, Black);
             }
             _batFill = NewRect("Fill", _batTrack);
             _batFill.anchorMin = new Vector2(0, 0); _batFill.anchorMax = new Vector2(0, 1);
             _batFill.pivot = new Vector2(0, 0.5f);
             _batFill.offsetMin = new Vector2(2, 2); _batFill.offsetMax = new Vector2(2, -2);
-            _batFillImg = Img(_batFill, White);
+            _batFillImg = Img(_batFill, Accent);
             _batFill.SetAsFirstSibling();
         }
 
@@ -410,11 +437,12 @@ namespace Bobery.Rover
                 float blink = 0.5f + 0.5f * Mathf.Sin(Time.time * 8f);
                 bool charging = _battery.IsCharging && _battery.Fraction < 0.999f;
                 bool warn = (_battery.IsLow && !charging) || _batFlash > 0f;
-                _batFillImg.color = charging ? new Color(1, 1, 1, Mathf.Lerp(0.6f, 1f, 0.5f + 0.5f * Mathf.Sin(Time.time * 4f)))
-                                  : warn ? new Color(1, 1, 1, Mathf.Lerp(0.35f, 1f, blink)) : White;
-                _batLabel.text = empty ? "BATTERY  —  DEPLETED" : charging ? "BATTERY  —  CHARGING"
-                               : _battery.IsLow ? "BATTERY  —  LOW" : "BATTERY";
-                _batLabel.color = warn || empty || charging ? White : Dim;
+                _batFillImg.color = charging ? A(Green, Mathf.Lerp(0.6f, 1f, 0.5f + 0.5f * Mathf.Sin(Time.time * 4f)))
+                                  : warn ? A(Red, Mathf.Lerp(0.35f, 1f, blink))
+                                  : _battery.Fraction < 0.5f ? Yellow : Accent;
+                _batLabel.text = empty ? "BATTERY [ERR ] DEPLETED" : charging ? "BATTERY [OKAY] CHARGING"
+                               : _battery.IsLow ? "BATTERY [WARN] LOW" : "BATTERY";
+                _batLabel.color = warn || empty ? Red : charging ? Green : Dim;
             }
 
             // No power → no picture. The overlay (rover, beacons, route) keeps working so you can drive blind to a beacon.
@@ -425,7 +453,7 @@ namespace Bobery.Rover
             if (empty)
             {
                 float a = 0.55f + 0.45f * Mathf.Abs(Mathf.Sin(Time.time * 2.5f));
-                _batAlertBg.color = new Color(1, 1, 1, a);
+                _batAlertBg.color = A(Red, a);
             }
         }
 
@@ -450,7 +478,7 @@ namespace Bobery.Rover
             Section("BEACONS", y, inner);
             _beaconCount = Label(_panel, "", 12, FontStyle.Bold, Dim, _mono);
             TopLeft(_beaconCount.rectTransform, Pad, y, inner, 16);
-            _beaconCount.alignment = TextAnchor.UpperRight;
+            _beaconCount.alignment = TextAlignmentOptions.TopRight;
             y += 26;
 
             _glyphSprite = BeaconGlyph(64);
@@ -462,14 +490,14 @@ namespace Bobery.Rover
                 var rt = NewRect("BeaconSlot" + i, _panel);
                 TopLeft(rt, Pad + i * (slotW + sg), y, slotW, s);
                 var bg = Img(rt, Ghost);
-                Outline(rt, new Color(1, 1, 1, 0.35f), 1);
-                var g = Img(NewRect("Glyph", rt), White);
+                Outline(rt, Faint, 1);
+                var g = Img(NewRect("Glyph", rt), Accent);
                 g.sprite = _glyphSprite;
                 g.preserveAspect = true;
                 Stretch(g.rectTransform, 7);
-                var x = Label(rt, "×", 26, FontStyle.Bold, White);
+                var x = Label(rt, "×", 26, FontStyle.Bold, Red);
                 Stretch(x.rectTransform, 0);
-                x.alignment = TextAnchor.MiddleCenter;
+                x.alignment = TextAlignmentOptions.Center;
 
                 // Cooldown: countdown along the bottom + a thin bar that drains as it runs out.
                 var timer = Label(rt, "", 10, FontStyle.Bold, White, _mono);
@@ -477,7 +505,7 @@ namespace Bobery.Rover
                 tr.anchorMin = new Vector2(0, 0); tr.anchorMax = new Vector2(1, 0);
                 tr.pivot = new Vector2(0.5f, 0);
                 tr.offsetMin = new Vector2(0, 4); tr.offsetMax = new Vector2(0, 18);
-                timer.alignment = TextAnchor.MiddleCenter;
+                timer.alignment = TextAlignmentOptions.Center;
                 var barTrack = NewRect("CooldownBar", rt);
                 barTrack.anchorMin = new Vector2(0, 0); barTrack.anchorMax = new Vector2(1, 0);
                 barTrack.pivot = new Vector2(0, 0);
@@ -496,13 +524,14 @@ namespace Bobery.Rover
             float iw = Pad + inner - ix;
             _beaconInfo = Label(_panel, "", 11, FontStyle.Normal, Dim, _mono);
             TopLeft(_beaconInfo.rectTransform, ix, y + 2, iw, s);
-            _beaconInfo.alignment = TextAnchor.UpperLeft;
+            _beaconInfo.alignment = TextAlignmentOptions.TopLeft;
 
             // Actions for the selected beacon (shown instead of the info text).
             _beaconActions = NewRect("BeaconActions", _panel);
             TopLeft(_beaconActions, ix, y, iw, s);
             _pickUpBtn = AddButton("PICK UP", 0, 0, iw, 20, filled: false, PickUpSelected, _beaconActions);
             _destroyBtn = AddButton("DESTROY", 0, 24, iw, 20, filled: false, DestroySelected, _beaconActions);
+            _destroyBtn.tone = Red;
             _pickUpBtn.label.fontSize = _destroyBtn.label.fontSize = 11;
             _beaconActions.gameObject.SetActive(false);
         }
@@ -515,13 +544,13 @@ namespace Bobery.Rover
             Stretch(_beaconRoot, 0);
 
             _placeGhost = NewRect("PlaceGhost", _map);
-            Img(_placeGhost, new Color(1, 1, 1, 0.08f)).sprite = _discSprite;
+            Img(_placeGhost, A(Accent, 0.1f)).sprite = _discSprite;
             var ring = NewRect("Ring", _placeGhost);
             Stretch(ring, 0);
-            Img(ring, new Color(1, 1, 1, 0.8f)).sprite = _ringSprite;
+            Img(ring, A(Accent, 0.85f)).sprite = _ringSprite;
             var icon = NewRect("Icon", _placeGhost);
             icon.sizeDelta = new Vector2(16, 16);
-            var ii = Img(icon, new Color(1, 1, 1, 0.8f)); ii.sprite = _glyphSprite; ii.preserveAspect = true;
+            var ii = Img(icon, A(Accent, 0.85f)); ii.sprite = _glyphSprite; ii.preserveAspect = true;
             _placeGhost.gameObject.SetActive(false);
         }
 
@@ -546,8 +575,8 @@ namespace Bobery.Rover
                 lr.pivot = new Vector2(0.5f, 1f);
                 lr.anchoredPosition = new Vector2(0, -11);
                 lr.sizeDelta = new Vector2(90, 14);
-                m.label.alignment = TextAnchor.UpperCenter;
-                m.label.gameObject.AddComponent<Shadow>().effectColor = new Color(0, 0, 0, 0.9f);
+                m.label.alignment = TextAlignmentOptions.Top;
+                RoverUI.Shadowed(m.label);
                 _beaconMarks.Add(m);
             }
             _beaconMarks[i].rt.gameObject.SetActive(true);
@@ -581,13 +610,16 @@ namespace Bobery.Rover
                     bool sel = b == _selected, hov = b == _hoverBeacon;
                     bool cool = b.IsCoolingDown;
                     float pulse = b.RoverInside && !cool ? 0.5f + 0.5f * Mathf.Sin(Time.time * 6f) : 0f;
-                    m.zoneImg.color = new Color(1, 1, 1, (cool ? 0.03f : 0.06f) + 0.06f * pulse + (sel ? 0.05f : 0f));
-                    m.ringImg.color = new Color(1, 1, 1, sel ? 1f : hov ? 0.85f : cool ? 0.3f : 0.55f);
+                    Color tint = cool ? Yellow : b.RoverInside ? Green : Accent;
+                    m.zoneImg.color = A(tint, (cool ? 0.04f : 0.08f) + 0.08f * pulse + (sel ? 0.06f : 0f));
+                    m.ringImg.color = A(tint, sel ? 1f : hov ? 0.85f : cool ? 0.35f : 0.6f);
                     m.icon.sizeDelta = Vector2.one * (sel || hov ? 20f : 16f);
-                    m.iconImg.color = b.Phase == Beacon.State.Falling ? new Color(1, 1, 1, 0.5f + 0.5f * Mathf.Sin(Time.time * 20f))
-                                    : cool ? new Color(1, 1, 1, 0.45f) : White;
-                    string timer = cool ? Beacon.Clock(b.CooldownLeft) : "";
-                    m.label.text = sel ? (cool ? $"SELECTED · {timer}" : "SELECTED")
+                    m.iconImg.color = b.Phase == Beacon.State.Falling ? A(Accent, 0.5f + 0.5f * Mathf.Sin(Time.time * 20f))
+                                    : cool ? A(Yellow, 0.6f) : tint;
+                    m.label.color = b.IsPickingUp ? Accent : cool ? Yellow : b.RoverInside && !sel ? Green : Accent;
+                    string timer = b.IsPickingUp ? $"PICK-UP {Beacon.Clock(b.PickUpLeft)}" : cool ? Beacon.Clock(b.CooldownLeft) : "";
+                    m.label.text = b.IsPickingUp ? timer
+                                 : sel ? (cool ? $"SELECTED · {timer}" : "SELECTED")
                                  : cool ? timer : b.RoverInside ? "CHARGING" : "";
                 }
             }
@@ -603,25 +635,28 @@ namespace Bobery.Rover
                 bool selected = isDeployed && _selected && IndexOf(_selected) == i - ready;
                 bool hover = Mouse.current != null && RectTransformUtility.RectangleContainsScreenPoint(s.rt, Mouse.current.position.ReadValue(), null);
                 bool light = armed || selected || (hover && (isReady || isDeployed));
-                s.bg.color = light ? White : isReady ? Ghost : new Color(0, 0, 0, 0.3f);
-                s.glyph.color = light ? Color.black : isReady ? White : isDeployed ? new Color(1, 1, 1, 0.45f) : new Color(1, 1, 1, 0.12f);
+                s.bg.color = light ? Accent : isReady ? Ghost : Black;
+                s.glyph.color = light ? RoverUI.OnAccent : isReady ? Accent : isDeployed ? Dim : A(Faint, 0.8f);
                 s.cross.gameObject.SetActive(!isReady && !isDeployed);
-                s.cross.color = new Color(1, 1, 1, 0.5f);
+                s.cross.color = A(Red, 0.7f);
 
-                // Deployed beacon on cooldown: glyph moves up to make room for the countdown.
+                // Beacon on cooldown (deployed, or picked up while cooling): glyph moves up to make room for the countdown.
                 var b = isDeployed ? list[i - ready] : null;
-                bool cool = b && b.IsCoolingDown;
+                bool lifting = b && b.IsPickingUp; // pick-up countdown takes the slot's timer while it runs
+                float coolLeft = !b ? 0f : lifting ? b.PickUpLeft : b.CooldownLeft;
+                float coolTotal = !b ? BeaconNetwork.Cooldown : lifting ? b.pickUpTime : b.cooldown;
+                bool cool = coolLeft > 0f;
                 s.timer.gameObject.SetActive(cool);
                 s.barTrack.gameObject.SetActive(cool);
                 s.glyph.rectTransform.offsetMin = new Vector2(7, cool ? 17 : 7);
                 s.glyph.rectTransform.offsetMax = new Vector2(-7, cool ? -3 : -7);
                 if (cool)
                 {
-                    float left = b.cooldown > 0f ? Mathf.Clamp01(b.CooldownLeft / b.cooldown) : 0f;
-                    s.timer.text = Beacon.Clock(b.CooldownLeft);
-                    s.timer.color = light ? Color.black : White;
+                    float left = coolTotal > 0f ? Mathf.Clamp01(coolLeft / coolTotal) : 0f;
+                    s.timer.text = Beacon.Clock(coolLeft);
+                    s.timer.color = light ? RoverUI.OnAccent : lifting ? Accent : Yellow;
                     s.bar.sizeDelta = new Vector2(s.barTrack.rect.width * left, 0f);
-                    s.barImg.color = light ? Color.black : White;
+                    s.barImg.color = light ? RoverUI.OnAccent : lifting ? Accent : Yellow;
                 }
             }
 
@@ -632,15 +667,17 @@ namespace Bobery.Rover
             if (showActions)
             {
                 bool inZone = rover && _selected.FlatDistance(rover.transform.position) <= _selected.radius;
-                _pickUpBtn.enabled = inZone && _selected.IsActive;
+                bool lifting = _selected.IsPickingUp;
+                _pickUpBtn.enabled = lifting || (inZone && _selected.IsActive);
+                _pickUpBtn.label.text = lifting ? $"CANCEL {Beacon.Clock(_selected.PickUpLeft)}" : "PICK UP";
                 _destroyBtn.label.text = _destroyConfirm > 0f ? "CONFIRM?" : "DESTROY";
             }
             else if (_placing)
-                _beaconInfo.text = $"<color=#ffffff>CLICK THE MAP</color>\n{BeaconNetwork.CostText}\nRMB / ESC CANCEL";
+                _beaconInfo.text = $"<color={RoverUI.Hex(Accent)}>> CLICK THE MAP_</color>\n{BeaconNetwork.CostText}\nRMB / ESC CANCEL";
             else
             {
                 string afford = BeaconNetwork.CanAfford ? ""
-                    : $"\n<color=#ffffff>NEED MORE {(!BeaconNetwork.HasFuel && !BeaconNetwork.HasBattery ? "FUEL+BATT" : !BeaconNetwork.HasFuel ? "FUEL" : "BATTERY")}</color>";
+                    : $"\n<color={RoverUI.Hex(Red)}>NEED MORE {(!BeaconNetwork.HasFuel && !BeaconNetwork.HasBattery ? "FUEL+BATT" : !BeaconNetwork.HasFuel ? "FUEL" : "BATTERY")}</color>";
                 _beaconInfo.text = ready > 0
                     ? $"{BeaconNetwork.CostText}\nZONE {BeaconNetwork.Radius:0} m · PICK SLOT{afford}"
                     : deployed > 0 ? "NONE IN STOCK\nPICK ONE UP TO REUSE" : "NO BEACONS LEFT";
@@ -678,12 +715,12 @@ namespace Bobery.Rover
         void PickUpSelected()
         {
             if (!_selected) return;
+            if (_selected.IsPickingUp) { BeaconNetwork.CancelPickUp(_selected); return; }
             if (!rover || _selected.FlatDistance(rover.transform.position) > _selected.radius)
             { Toast("Drive into the beacon's zone to pick it up"); return; }
             if (!_selected.IsActive) return;
-            BeaconNetwork.PickUp(_selected);
-            _selected = null;
-            Toast("Beacon recovered");
+            BeaconNetwork.BeginPickUp(_selected);
+            if (_selected && _selected.IsPickingUp) Toast($"Picking up: stay in the zone for {Beacon.Clock(_selected.PickUpLeft)}");
         }
 
         void DestroySelected()
@@ -743,25 +780,25 @@ namespace Bobery.Rover
             TopLeft(_fuelLabel.rectTransform, 0, 0, inner, 16);
             _fuelValue = Label(block, "", 13, FontStyle.Bold, White, _mono);
             TopLeft(_fuelValue.rectTransform, 0, -2, inner, 18);
-            _fuelValue.alignment = TextAnchor.UpperRight;
+            _fuelValue.alignment = TextAlignmentOptions.TopRight;
 
             _fuelTrack = NewRect("Track", block);
             TopLeft(_fuelTrack, 0, 24, inner, 14);
-            Img(_fuelTrack, Faint);
-            Outline(_fuelTrack, new Color(1, 1, 1, 0.25f), 1);
+            Img(_fuelTrack, Ghost);
+            Outline(_fuelTrack, Faint, 1);
             // quarter ticks
             for (int i = 1; i < 4; i++)
             {
                 var t = NewRect("Tick", _fuelTrack);
                 t.anchorMin = t.anchorMax = new Vector2(i / 4f, 0.5f);
                 t.sizeDelta = new Vector2(1, 14);
-                Img(t, new Color(0, 0, 0, 0.6f));
+                Img(t, Black);
             }
             _fuelFill = NewRect("Fill", _fuelTrack);
             _fuelFill.anchorMin = new Vector2(0, 0); _fuelFill.anchorMax = new Vector2(0, 1);
             _fuelFill.pivot = new Vector2(0, 0.5f);
             _fuelFill.offsetMin = new Vector2(2, 2); _fuelFill.offsetMax = new Vector2(2, -2);
-            _fuelFillImg = Img(_fuelFill, White);
+            _fuelFillImg = Img(_fuelFill, Accent);
             _fuelFill.SetAsFirstSibling(); // under the ticks and the outline
 
             _fuelInfo = Label(block, "", 12, FontStyle.Normal, Dim, _mono);
@@ -788,9 +825,9 @@ namespace Bobery.Rover
             _fuelFlash = Mathf.Max(0f, _fuelFlash - Time.deltaTime);
             float blink = 0.5f + 0.5f * Mathf.Sin(Time.time * 8f);
             bool warn = _tank.IsLow || _fuelFlash > 0f;
-            _fuelFillImg.color = warn ? new Color(1, 1, 1, Mathf.Lerp(0.35f, 1f, blink)) : White;
-            _fuelLabel.text = _tank.IsEmpty ? "FUEL  —  EMPTY" : _tank.IsLow ? "FUEL  —  LOW" : "FUEL";
-            _fuelLabel.color = warn || _tank.IsEmpty ? White : Dim;
+            _fuelFillImg.color = warn ? A(Red, Mathf.Lerp(0.35f, 1f, blink)) : _tank.Fraction < 0.5f ? Yellow : Accent;
+            _fuelLabel.text = _tank.IsEmpty ? "FUEL [ERR ] EMPTY" : _tank.IsLow ? "FUEL [WARN] LOW" : "FUEL";
+            _fuelLabel.color = warn || _tank.IsEmpty ? Red : Dim;
         }
 
         void OnRanOut()
@@ -812,7 +849,7 @@ namespace Bobery.Rover
             _mapImage.texture = _rt;
             _map.gameObject.AddComponent<RectMask2D>(); // clip route lines that run off the map
             Outline(frame, Faint, 1);
-            Brackets(frame, 16, 2, White);
+            Brackets(frame, 16, 2, Accent);
 
             // Subtle grid + vignette
             var grid = NewRect("Grid", _map);
@@ -820,7 +857,7 @@ namespace Bobery.Rover
             var gridImg = grid.gameObject.AddComponent<RawImage>();
             gridImg.texture = GridTexture(64);
             gridImg.uvRect = new Rect(0, 0, side / 48f, side / 48f);
-            gridImg.color = new Color(1, 1, 1, 0.07f);
+            gridImg.color = A(Accent, 0.08f);
             gridImg.raycastTarget = false;
 
             var vig = NewRect("Vignette", _map);
@@ -834,7 +871,7 @@ namespace Bobery.Rover
             {
                 var c = NewRect("Cross", _map);
                 c.sizeDelta = i == 0 ? new Vector2(14, 1) : new Vector2(1, 14);
-                Img(c, new Color(1, 1, 1, 0.25f)).raycastTarget = false;
+                Img(c, A(Accent, 0.35f)).raycastTarget = false;
             }
 
             // Beacon zones + placement ghost (under the route and the rover).
@@ -848,48 +885,48 @@ namespace Bobery.Rover
 
             _destIcon = NewRect("Destination", _map);
             _destIcon.sizeDelta = new Vector2(12, 12);
-            var dImg = Img(_destIcon, White);
+            var dImg = Img(_destIcon, Accent);
             dImg.sprite = Circle(64, 0.18f); // white dot with dark outline
             dImg.raycastTarget = false;
             _destIcon.gameObject.SetActive(false);
 
             _hoverIcon = NewRect("Hover", _map);
             _hoverIcon.sizeDelta = new Vector2(18, 18);
-            var hImg = Img(_hoverIcon, new Color(1, 1, 1, 0.6f));
+            var hImg = Img(_hoverIcon, A(Accent, 0.7f));
             hImg.sprite = Ring(64, 0.78f);
             hImg.raycastTarget = false;
-            _hoverText = Label(_hoverIcon, "", 12, FontStyle.Bold, White, _mono);
+            _hoverText = Label(_hoverIcon, "", 12, FontStyle.Bold, Accent, _mono);
             var htRt = _hoverText.rectTransform;
             htRt.anchorMin = htRt.anchorMax = new Vector2(0.5f, 0.5f);
             htRt.pivot = new Vector2(0, 0.5f);
             htRt.anchoredPosition = new Vector2(14, 0);
             htRt.sizeDelta = new Vector2(80, 18);
-            _hoverText.gameObject.AddComponent<Shadow>().effectColor = new Color(0, 0, 0, 0.9f);
+            RoverUI.Shadowed(_hoverText);
             _hoverIcon.gameObject.SetActive(false);
 
             // Area around the rover that's too close to drive to (= arrive distance).
             _noGo = NewRect("NoGoZone", _map);
-            var ngFill = Img(_noGo, new Color(1, 1, 1, 0.07f));
+            var ngFill = Img(_noGo, A(Red, 0.08f));
             ngFill.sprite = Circle(128, 0f);
             var ngRing = NewRect("Ring", _noGo);
             Stretch(ngRing, 0);
-            Img(ngRing, new Color(1, 1, 1, 0.55f)).sprite = Ring(256, 0.965f);
+            Img(ngRing, A(Red, 0.55f)).sprite = Ring(256, 0.965f);
 
             _roverIcon = NewRect("RoverIcon", _map);
             _roverIcon.sizeDelta = new Vector2(24, 24);
-            var rImg = Img(_roverIcon, White);
+            var rImg = Img(_roverIcon, Accent);
             rImg.sprite = Arrow(64);
             rImg.raycastTarget = false;
 
             // Overlays: north, zoom, scale bar, coordinates, toast
-            var north = Label(frame, "N", 13, FontStyle.Bold, White, _mono);
+            var north = Label(frame, "N", 13, FontStyle.Bold, Accent, _mono);
             var nRt = north.rectTransform;
             nRt.anchorMin = nRt.anchorMax = new Vector2(0.5f, 1);
             nRt.pivot = new Vector2(0.5f, 1);
             nRt.anchoredPosition = new Vector2(0, -8);
             nRt.sizeDelta = new Vector2(30, 18);
-            north.alignment = TextAnchor.UpperCenter;
-            north.gameObject.AddComponent<Shadow>().effectColor = new Color(0, 0, 0, 0.9f);
+            north.alignment = TextAlignmentOptions.Top;
+            RoverUI.Shadowed(north);
             north.gameObject.SetActive(!rotateWithRover);
 
             AddButton("+", 0, 0, 30, 30, filled: false, () => Zoom(-1f), frame, topRight: new Vector2(10, 10));
@@ -911,35 +948,35 @@ namespace Bobery.Rover
             var sRt = _scaleText.rectTransform;
             sRt.anchorMin = new Vector2(0, 1); sRt.anchorMax = new Vector2(0, 1);
             sRt.pivot = new Vector2(0, 0); sRt.anchoredPosition = new Vector2(0, 3); sRt.sizeDelta = new Vector2(80, 14);
-            _scaleText.gameObject.AddComponent<Shadow>().effectColor = new Color(0, 0, 0, 0.9f);
+            RoverUI.Shadowed(_scaleText);
 
-            _coordText = Label(frame, "", 11, FontStyle.Bold, White, _mono);
+            _coordText = Label(frame, "", 11, FontStyle.Bold, Dim, _mono);
             var cRt = _coordText.rectTransform;
             cRt.anchorMin = cRt.anchorMax = new Vector2(1, 0);
             cRt.pivot = new Vector2(1, 0);
             cRt.anchoredPosition = new Vector2(-12, 10);
             cRt.sizeDelta = new Vector2(180, 14);
-            _coordText.alignment = TextAnchor.LowerRight;
-            _coordText.gameObject.AddComponent<Shadow>().effectColor = new Color(0, 0, 0, 0.9f);
+            _coordText.alignment = TextAlignmentOptions.BottomRight;
+            RoverUI.Shadowed(_coordText);
 
             // No power: centre label on the map + blinking alert banner across the top of the map.
             _noSignal = NewRect("NoSignal", frame);
             _noSignal.anchorMin = _noSignal.anchorMax = new Vector2(0.5f, 0.5f);
             _noSignal.sizeDelta = new Vector2(side - 40, 60);
             _noSignal.anchoredPosition = new Vector2(0, 40);
-            var ns = Label(_noSignal, "NO SIGNAL", 22, FontStyle.Bold, new Color(1, 1, 1, 0.35f), _mono);
+            var ns = Label(_noSignal, "[ NO SIGNAL ]", 22, FontStyle.Bold, A(Red, 0.6f), _mono);
             Stretch(ns.rectTransform, 0);
-            ns.alignment = TextAnchor.MiddleCenter;
+            ns.alignment = TextAlignmentOptions.Center;
             _noSignal.gameObject.SetActive(false);
 
             _batAlert = NewRect("BatteryAlert", frame);
             _batAlert.anchorMin = new Vector2(0, 1); _batAlert.anchorMax = new Vector2(1, 1);
             _batAlert.pivot = new Vector2(0.5f, 1);
             _batAlert.offsetMin = new Vector2(10, -30 - 46); _batAlert.offsetMax = new Vector2(-48, -30);
-            _batAlertBg = Img(_batAlert, White);
-            _batAlertText = Label(_batAlert, "<b>BATTERY DEPLETED</b>\n<size=11>Map offline · weapons disabled · recharge at a beacon</size>", 14, FontStyle.Normal, Color.black);
+            _batAlertBg = Img(_batAlert, Red);
+            _batAlertText = Label(_batAlert, "<b>[ERR ] BATTERY DEPLETED</b>\n<size=11>MAP OFFLINE · WEAPONS DISABLED · RECHARGE AT A BEACON</size>", 14, FontStyle.Normal, RoverUI.OnAccent);
             Stretch(_batAlertText.rectTransform, 4);
-            _batAlertText.alignment = TextAnchor.MiddleCenter;
+            _batAlertText.alignment = TextAlignmentOptions.Center;
             _batAlert.gameObject.SetActive(false);
 
             _toast = NewRect("Toast", frame);
@@ -947,11 +984,11 @@ namespace Bobery.Rover
             _toast.pivot = new Vector2(0.5f, 0);
             _toast.anchoredPosition = new Vector2(0, 36);
             _toast.sizeDelta = new Vector2(220, 28);
-            _toastBg = Img(_toast, new Color(0, 0, 0, 0.85f));
-            Outline(_toast, new Color(1, 1, 1, 0.25f), 1);
-            _toastText = Label(_toast, "", 13, FontStyle.Bold, White);
+            _toastBg = Img(_toast, Black);
+            _toastEdges = Outline(_toast, Accent, 1);
+            _toastText = Label(_toast, "", 13, FontStyle.Bold, Accent);
             Stretch(_toastText.rectTransform, 0);
-            _toastText.alignment = TextAnchor.MiddleCenter;
+            _toastText.alignment = TextAlignmentOptions.Center;
             _toast.gameObject.SetActive(false);
         }
 
@@ -965,8 +1002,9 @@ namespace Bobery.Rover
             {
                 _toastTimer -= Time.deltaTime;
                 float a = Mathf.Clamp01(_toastTimer / 0.3f);
-                _toastBg.color = new Color(0, 0, 0, 0.85f * a);
-                _toastText.color = new Color(1, 1, 1, a);
+                _toastBg.color = A(Black, a);
+                _toastText.color = A(Accent, a);
+                RoverUI.SetOutline(_toastEdges, A(Accent, a));
                 if (_toastTimer <= 0f) _toast.gameObject.SetActive(false);
             }
         }
@@ -1011,11 +1049,7 @@ namespace Bobery.Rover
                 if (!b.rt.gameObject.activeInHierarchy) continue;
                 bool inside = RectTransformUtility.RectangleContainsScreenPoint(b.rt, screen, null);
                 overButton |= inside;
-                bool hover = inside && b.enabled;
-                bool light = b.filled != hover;      // hover inverts the colours
-                float a = b.enabled ? 1f : 0.35f;
-                b.bg.color = light ? new Color(1, 1, 1, a) : new Color(0, 0, 0, 0.55f);
-                b.label.color = light ? new Color(0, 0, 0, a) : new Color(1, 1, 1, a);
+                UIButtons.Paint(b.bg, b.edges, b.label, b.filled, b.enabled, inside, b.tone);
                 // a disabled PICK UP still explains why it can't be used
                 if (inside && click) clicked = b.enabled ? b.onClick : (b == _pickUpBtn ? PickUpSelected : null);
             }
@@ -1230,7 +1264,7 @@ namespace Bobery.Rover
                 rt.pivot = new Vector2(0, 0.5f);
                 var img = rt.gameObject.AddComponent<RawImage>();
                 img.texture = _dashTex;
-                img.color = new Color(1, 1, 1, 0.85f);
+                img.color = A(Accent, 0.9f);
                 img.raycastTarget = false;
                 _segs.Add(rt);
                 _segImgs.Add(img);
@@ -1245,7 +1279,7 @@ namespace Bobery.Rover
             {
                 var rt = NewRect("Joint", _pathRoot);
                 rt.sizeDelta = new Vector2(5, 5);
-                var img = Img(rt, new Color(1, 1, 1, 0.85f));
+                var img = Img(rt, A(Accent, 0.9f));
                 img.sprite = _jointSprite;
                 _joints.Add(rt);
             }
@@ -1288,9 +1322,12 @@ namespace Bobery.Rover
             _progressText.text = has ? $"{prog * 100f:0}%" : "—";
 
             string state = _tank && _tank.IsEmpty ? "NO FUEL" : _battery && _battery.IsEmpty ? "NO POWER" : has ? (speed > 0.3f ? "EN ROUTE" : "TURNING") : "IDLE";
+            Color sc = state == "NO FUEL" || state == "NO POWER" ? Red : state == "EN ROUTE" ? Green : state == "TURNING" ? Yellow : Accent;
             if (state != _lastState) { _stateText.text = state; _lastState = state; }
-            float blink = has ? 0.35f + 0.65f * Mathf.Abs(Mathf.Sin(Time.time * 3f)) : 0.45f;
-            _stateDot.color = new Color(1, 1, 1, blink);
+            _stateText.color = sc;
+            RoverUI.SetOutline(_pillEdges, sc);
+            float blink = has ? 0.35f + 0.65f * Mathf.Abs(Mathf.Sin(Time.time * 3f)) : 0.6f;
+            _stateDot.color = A(sc, blink);
         }
 
         void OnArrived() => Toast("Destination reached");
@@ -1299,8 +1336,8 @@ namespace Bobery.Rover
         {
             if (!_toast) return;
             _toast.gameObject.SetActive(true);
-            _toastText.text = msg;
-            _toast.sizeDelta = new Vector2(Mathf.Max(160f, msg.Length * 8.5f + 40f), 28);
+            _toastText.text = "> " + msg.ToUpperInvariant();
+            _toast.sizeDelta = new Vector2(Mathf.Max(160f, (msg.Length + 2) * 8.2f + 40f), 28);
             _toastTimer = 2.2f;
         }
 
@@ -1333,14 +1370,15 @@ namespace Bobery.Rover
 
         void Section(string name, float y, float inner)
         {
-            var t = Label(_panel, name, 12, FontStyle.Bold, Dim);
+            var t = Label(_panel, name, 13, FontStyle.Bold, Accent);
             TopLeft(t.rectTransform, Pad, y, inner, 16);
             var rule = NewRect("Rule", _panel);
-            TopLeft(rule, Pad + name.Length * 9f + 10f, y + 8, inner - (name.Length * 9f + 10f) - 44f, 1);
+            float tw = name.Length * 8f + 12f;
+            TopLeft(rule, Pad + tw, y + 8, inner - tw - 52f, 1);
             Img(rule, Faint);
         }
 
-        Text Card(string name, float x, float y, float w, float h)
+        TextMeshProUGUI Card(string name, float x, float y, float w, float h)
         {
             var card = NewRect(name, _panel);
             TopLeft(card, x, y, w, h);
@@ -1349,11 +1387,11 @@ namespace Bobery.Rover
             // compact: label on the left, value on the right, one line
             var lbl = Label(card, name, 10, FontStyle.Bold, Dim);
             TopLeft(lbl.rectTransform, 12, 0, w - 24, h);
-            lbl.alignment = TextAnchor.MiddleLeft;
+            lbl.alignment = TextAlignmentOptions.Left;
             var val = Label(card, "—", 17, FontStyle.Bold, White, _mono);
             TopLeft(val.rectTransform, 12, 0, w - 24, h);
-            val.alignment = TextAnchor.MiddleRight;
-            val.supportRichText = true;
+            val.alignment = TextAlignmentOptions.Right;
+            val.richText = true;
             return val;
         }
 
@@ -1363,12 +1401,13 @@ namespace Bobery.Rover
             var rt = NewRect("Btn_" + text, parent ? parent : _panel);
             if (topRight.HasValue) TopRight(rt, topRight.Value.x, topRight.Value.y, w, h);
             else TopLeft(rt, x, y, w, h);
-            var bg = Img(rt, filled ? White : new Color(0, 0, 0, 0.55f));
-            Outline(rt, new Color(1, 1, 1, 0.6f), 1);
-            var label = Label(rt, text, text.Length <= 1 ? 18 : 13, FontStyle.Bold, filled ? Color.black : White);
+            var bg = Img(rt, Black);
+            var edges = Outline(rt, Faint, 1);
+            var label = Label(rt, text, text.Length <= 1 ? 18 : 13, FontStyle.Bold, White);
             Stretch(label.rectTransform, 0);
-            label.alignment = TextAnchor.MiddleCenter;
-            var btn = new Btn { rt = rt, bg = bg, label = label, onClick = onClick, filled = filled };
+            label.alignment = TextAlignmentOptions.Center;
+            var btn = new Btn { rt = rt, bg = bg, edges = edges, label = label, onClick = onClick, filled = filled };
+            UIButtons.Paint(bg, edges, label, filled, true, false, btn.tone);
             _buttons.Add(btn);
             return btn;
         }
@@ -1382,19 +1421,19 @@ namespace Bobery.Rover
             cap.anchoredPosition = new Vector2(x, 4);
             cap.sizeDelta = new Vector2(kw, 22);
             Img(cap, Ghost);
-            Outline(cap, new Color(1, 1, 1, 0.3f), 1);
-            var k = Label(cap, key, 11, FontStyle.Bold, White, _mono);
+            Outline(cap, Faint, 1);
+            var k = Label(cap, key, 11, FontStyle.Bold, Accent, _mono);
             Stretch(k.rectTransform, 0);
-            k.alignment = TextAnchor.MiddleCenter;
+            k.alignment = TextAlignmentOptions.Center;
 
-            float aw = action.Length * 7f + 12f;
+            float aw = action.Length * 7.5f + 12f;
             var a = Label(parent, action, 12, FontStyle.Normal, Dim);
             var art = a.rectTransform;
             art.anchorMin = art.anchorMax = new Vector2(0, 0);
             art.pivot = new Vector2(0, 0);
             art.anchoredPosition = new Vector2(x + kw + 8, 4);
             art.sizeDelta = new Vector2(aw, 22);
-            a.alignment = TextAnchor.MiddleLeft;
+            a.alignment = TextAlignmentOptions.Left;
             return x + kw + 8 + aw;
         }
 
@@ -1436,21 +1475,7 @@ namespace Bobery.Rover
         }
 
         /// <summary>1px-style border made of four thin images.</summary>
-        static void Outline(RectTransform rt, Color c, float t)
-        {
-            void Edge(string n, Vector2 aMin, Vector2 aMax, Vector2 size)
-            {
-                var e = NewRect(n, rt);
-                e.anchorMin = aMin; e.anchorMax = aMax;
-                e.pivot = new Vector2(0.5f, 0.5f);
-                e.sizeDelta = size; e.anchoredPosition = Vector2.zero;
-                Img(e, c);
-            }
-            Edge("T", new Vector2(0, 1), new Vector2(1, 1), new Vector2(0, t));
-            Edge("B", new Vector2(0, 0), new Vector2(1, 0), new Vector2(0, t));
-            Edge("L", new Vector2(0, 0), new Vector2(0, 1), new Vector2(t, 0));
-            Edge("R", new Vector2(1, 0), new Vector2(1, 1), new Vector2(t, 0));
-        }
+        static Image[] Outline(RectTransform rt, Color c, float t) => RoverUI.Outline(rt, c, t);
 
         /// <summary>L-shaped corner brackets just outside the rect.</summary>
         static void Brackets(RectTransform rt, float len, float t, Color c)
@@ -1473,20 +1498,9 @@ namespace Bobery.Rover
             }
         }
 
-        Text Label(Transform parent, string text, int size, FontStyle style, Color color, Font font = null)
+        TextMeshProUGUI Label(Transform parent, string text, int size, FontStyle style, Color color, Font font = null)
         {
-            var rt = NewRect("Text", parent);
-            var t = rt.gameObject.AddComponent<Text>();
-            t.font = font ? font : _font;
-            t.text = text;
-            t.fontSize = size;
-            t.fontStyle = style;
-            t.color = color;
-            t.raycastTarget = false;
-            t.supportRichText = true;
-            t.horizontalOverflow = HorizontalWrapMode.Wrap;
-            t.verticalOverflow = VerticalWrapMode.Overflow;
-            return t;
+            return RoverUI.Label(parent, text, size, style, color); // all UI text is Consolas TMP
         }
 
         // ================================================================ generated textures

@@ -54,6 +54,10 @@ namespace Bobery.Rover
             : null;
 
         public static float Cooldown { get; private set; } = 300f;
+        /// <summary>Seconds it takes to pick a beacon up (the rover has to stay in its zone). 0 = instant.</summary>
+        public static float PickUpTime { get; set; } = 10f;
+        /// <summary>3D model used for placed beacons (Models/beacon). Null → a primitive stand-in is built.</summary>
+        public static GameObject Model { get; set; }
 
         public static void Configure(int capacity, float fuelCostFraction, float batteryCostFraction, float radius, float chargePerSecond, float cooldown)
         {
@@ -85,13 +89,28 @@ namespace Bobery.Rover
             beacon.radius = Radius;
             beacon.chargePerSecond = ChargePerSecond;
             beacon.cooldown = Cooldown;
+            beacon.pickUpTime = PickUpTime;
             _deployed.Add(beacon);
             Changed?.Invoke();
             error = null;
             return true;
         }
 
-        /// <summary>Recovers a beacon back into stock (no refund of its cost).</summary>
+        /// <summary>Starts the timed pick-up of <paramref name="b"/>; it returns to stock when the countdown ends.</summary>
+        public static void BeginPickUp(Beacon b)
+        {
+            if (!b || !_deployed.Contains(b)) return;
+            if (b.BeginPickUp()) Changed?.Invoke();
+        }
+
+        public static void CancelPickUp(Beacon b)
+        {
+            if (!b || !b.IsPickingUp) return;
+            b.CancelPickUp("Beacon pick-up cancelled");
+            Changed?.Invoke();
+        }
+
+        /// <summary>Recovers a beacon back into stock right away (no refund of its cost).</summary>
         public static void PickUp(Beacon b)
         {
             if (!b || !_deployed.Remove(b)) return;
@@ -134,13 +153,14 @@ namespace Bobery.Rover
             Destroyed = 0;
             Capacity = 4;
             Changed = null;
+            Model = null;
         }
     }
 
     /// <summary>
     /// A charging beacon. Falls from the sky, pins itself into the ground and projects a charging zone
     /// (transparent disc hugging the terrain). While the rover stands inside the zone its battery recharges.
-    /// Built from primitives at runtime, no assets needed. Create through <see cref="BeaconNetwork.TryPlace"/>.
+    /// Uses the Models/beacon model (<see cref="BeaconNetwork.Model"/>), or primitives if none is assigned. Create through <see cref="BeaconNetwork.TryPlace"/>.
     /// </summary>
     public class Beacon : MonoBehaviour
     {
@@ -149,6 +169,8 @@ namespace Bobery.Rover
         public float dropHeight = 70f;
         public float dropTime = 1.1f;
         public Color color = Color.white;
+        [Tooltip("Height the beacon model is scaled to (metres). 0 keeps the model's own size.")]
+        public float modelHeight = 4.5f;
 
         public enum State { Falling, Active, Retracting, Exploding }
         public State Phase { get; private set; } = State.Falling;
@@ -161,10 +183,32 @@ namespace Bobery.Rover
         public float cooldown = 300f;
         public float CooldownLeft { get; private set; }
         public bool IsCoolingDown => CooldownLeft > 0f;
+
+        [Tooltip("Seconds it takes to pick the beacon up. The rover must stay inside the zone meanwhile.")]
+        public float pickUpTime = 10f;
+        public float PickUpLeft { get; private set; }
+        public bool IsPickingUp => PickUpLeft > 0f;
+
+        /// <summary>Starts the pick-up countdown (instant if <see cref="pickUpTime"/> is 0). False if it can't start.</summary>
+        public bool BeginPickUp()
+        {
+            if (!IsActive || IsPickingUp) return false;
+            if (pickUpTime <= 0f) { BeaconNetwork.PickUp(this); return true; }
+            PickUpLeft = pickUpTime;
+            RoverHud.Notify($"Picking up beacon: {Clock(PickUpLeft)} · stay in the zone");
+            return true;
+        }
+
+        public void CancelPickUp(string why)
+        {
+            if (!IsPickingUp) return;
+            PickUpLeft = 0f;
+            RoverHud.Notify(why);
+        }
         float _delivered;
         TextMesh _timer;
 
-        const float PinDepth = 0.6f;
+        float PinDepth = 0.6f; // how far the body sinks into the ground on landing
         const int Rings = 10, Segments = 72;
 
         RoverController _rover;
@@ -247,6 +291,7 @@ namespace Bobery.Rover
             // Zone opens out from the pin.
             ZoneOpen = Mathf.Clamp01(_t / 0.7f);
             float e = 1f - Mathf.Pow(1f - ZoneOpen, 3f);
+            if (IsPickingUp && pickUpTime > 0f) e *= Mathf.Lerp(0.25f, 1f, PickUpLeft / pickUpTime);
             _zone.localScale = _edge.localScale = new Vector3(e, 1f, e);
 
             float breathe = 0.5f + 0.5f * Mathf.Sin(Time.time * 2.2f);
@@ -258,6 +303,22 @@ namespace Bobery.Rover
                               : _battery && _battery.Fraction < 0.999f ? "Beacon in range: charging" : "Beacon in range");
             RoverInside = inside;
 
+            // Timed pick-up: the rover has to wait in the zone; the beacon stops charging meanwhile.
+            if (IsPickingUp)
+            {
+                if (!inside) CancelPickUp("Beacon pick-up cancelled: rover left the zone");
+                else
+                {
+                    PickUpLeft = Mathf.Max(0f, PickUpLeft - Time.deltaTime);
+                    if (!IsPickingUp)
+                    {
+                        RoverHud.Notify("Beacon recovered");
+                        BeaconNetwork.PickUp(this);
+                        return;
+                    }
+                }
+            }
+
             // Cooldown: after a charging session the beacon needs time before it can charge again.
             if (IsCoolingDown)
             {
@@ -266,7 +327,7 @@ namespace Bobery.Rover
             }
 
             bool charging = false;
-            if (!IsCoolingDown && inside && _battery && !RoverInterior.IsInside && _battery.Fraction < 0.999f)
+            if (!IsCoolingDown && !IsPickingUp && inside && _battery && !RoverInterior.IsInside && _battery.Fraction < 0.999f)
             {
                 _delivered += _battery.Recharge(chargePerSecond * Time.deltaTime);
                 charging = true;
@@ -290,8 +351,8 @@ namespace Bobery.Rover
             _pulse.localScale = new Vector3(p, 1f, p) * e;
             SetAlpha(_pulseMat, IsCoolingDown ? 0f : (charging ? 0.6f : 0.25f) * (1f - p) * e);
 
-            SetHeadGlow(IsCoolingDown ? 0.1f : charging ? 0.7f + 0.3f * Mathf.Sin(Time.time * 10f) : 0.55f + 0.2f * breathe);
-            _head.localRotation = Quaternion.Euler(0f, Time.time * (charging ? 240f : IsCoolingDown ? 10f : 60f), 0f);
+            SetHeadGlow(IsPickingUp ? 0.5f + 0.5f * Mathf.Sin(Time.time * 14f) : IsCoolingDown ? 0.1f : charging ? 0.7f + 0.3f * Mathf.Sin(Time.time * 10f) : 0.55f + 0.2f * breathe);
+            _head.localRotation = Quaternion.Euler(0f, Time.time * (IsPickingUp ? 400f : charging ? 240f : IsCoolingDown ? 10f : 60f), 0f);
 
             UpdateTimerLabel();
         }
@@ -300,10 +361,11 @@ namespace Bobery.Rover
         void UpdateTimerLabel()
         {
             if (!_timer) return;
-            bool show = IsCoolingDown && (Phase == State.Active);
+            bool show = (IsCoolingDown || IsPickingUp) && Phase == State.Active;
             if (_timer.gameObject.activeSelf != show) _timer.gameObject.SetActive(show);
             if (!show) return;
-            _timer.text = Clock(CooldownLeft);
+            // Pick-up countdown wins over the charging cooldown while both run.
+            _timer.text = IsPickingUp ? $"PICK-UP {Clock(PickUpLeft)}" : Clock(CooldownLeft);
             var cam = Camera.main;
             if (cam)
             {
@@ -439,23 +501,8 @@ namespace Bobery.Rover
             _body = new GameObject("Body").transform;
             _body.SetParent(transform, false);
 
-            Part(PrimitiveType.Cylinder, _body, new Vector3(0f, -0.4f, 0f), new Vector3(0.18f, 0.9f, 0.18f), _bodyMat);   // spike
-            Part(PrimitiveType.Cylinder, _body, new Vector3(0f, 0.6f, 0f), new Vector3(1.6f, 0.08f, 1.6f), _bodyMat);    // base plate
-            Part(PrimitiveType.Cylinder, _body, new Vector3(0f, 2.2f, 0f), new Vector3(0.3f, 1.6f, 0.3f), _bodyMat);     // mast
-            for (int i = 0; i < 3; i++)                                                                                   // fins
-            {
-                var fin = Part(PrimitiveType.Cube, _body, Vector3.zero, new Vector3(0.08f, 1.4f, 0.7f), _bodyMat);
-                fin.localRotation = Quaternion.Euler(0f, i * 120f, 0f);
-                fin.localPosition = fin.localRotation * new Vector3(0f, 1.3f, 0.4f);
-            }
-            Part(PrimitiveType.Cylinder, _body, new Vector3(0f, 3.85f, 0f), new Vector3(0.7f, 0.06f, 0.7f), _bodyMat);   // collar
-
-            _head = new GameObject("Head").transform;
-            _head.SetParent(_body, false);
-            _head.localPosition = new Vector3(0f, 4.4f, 0f);
-            Part(PrimitiveType.Sphere, _head, Vector3.zero, Vector3.one * 0.6f, _headMat);
-            Part(PrimitiveType.Cube, _head, Vector3.zero, new Vector3(1.3f, 0.06f, 0.06f), _headMat);                     // spinning bars
-            Part(PrimitiveType.Cube, _head, Vector3.zero, new Vector3(0.06f, 0.06f, 1.3f), _headMat);
+            float top = BeaconNetwork.Model ? BuildFromModel(BeaconNetwork.Model) : BuildPrimitive();
+            if (BeaconNetwork.Model) PinDepth = 0.15f; // the model has no spike: just settle it into the dirt
 
             var lightGo = new GameObject("Light");
             lightGo.transform.SetParent(_head, false);
@@ -476,9 +523,9 @@ namespace Bobery.Rover
             // ---- cooldown countdown, floating above the head
             var timerGo = new GameObject("CooldownTimer");
             timerGo.transform.SetParent(transform, false);
-            timerGo.transform.localPosition = new Vector3(0f, 6.2f, 0f);
+            timerGo.transform.localPosition = new Vector3(0f, top + 1.6f, 0f);
             _timer = timerGo.AddComponent<TextMesh>();
-            _timer.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            _timer.font = RoverUI.Mono;
             timerGo.GetComponent<MeshRenderer>().sharedMaterial = _timer.font.material;
             _timer.fontSize = 64;
             _timer.characterSize = 0.06f;
@@ -488,6 +535,86 @@ namespace Bobery.Rover
             _timer.color = color;
             timerGo.SetActive(false);
             _zone.localScale = _edge.localScale = _pulse.localScale = new Vector3(0f, 1f, 0f);
+        }
+
+        /// <summary>Instantiates the beacon model under the body, sized to <see cref="modelHeight"/>.
+        /// Its sphere becomes the spinning head. Returns the model's top height.</summary>
+        float BuildFromModel(GameObject prefab)
+        {
+            var model = Instantiate(prefab, _body, false);
+            model.name = "Model";
+            model.transform.localPosition = Vector3.zero;
+            model.transform.localRotation = Quaternion.identity;
+            foreach (var c in model.GetComponentsInChildren<Collider>(true)) Destroy(c); // the rover drives through it
+            foreach (var a in model.GetComponentsInChildren<Animator>(true)) Destroy(a);
+
+            var renderers = model.GetComponentsInChildren<Renderer>(true);
+            Bounds b = LocalBounds(renderers);
+            if (modelHeight > 0f && b.size.y > 0.001f)
+            {
+                model.transform.localScale *= modelHeight / b.size.y;
+                b = LocalBounds(renderers);
+            }
+            // stand it on the pin: bottom at ground level, centred on the pin
+            model.transform.localPosition = new Vector3(-b.center.x, -b.min.y, -b.center.z);
+            b = LocalBounds(renderers);
+
+            // The sphere on top spins: give it a pivot at its own centre.
+            Transform sphere = null;
+            foreach (var r in renderers)
+                if (r.name.IndexOf("sphere", StringComparison.OrdinalIgnoreCase) >= 0) { sphere = r.transform; break; }
+            _head = new GameObject("Head").transform;
+            _head.SetParent(_body, false);
+            if (sphere)
+            {
+                var sb = sphere.GetComponent<Renderer>().bounds;
+                _head.position = sb.center;
+                sphere.SetParent(_head, true);
+            }
+            else _head.localPosition = new Vector3(0f, b.max.y, 0f);
+            return b.max.y;
+        }
+
+        /// <summary>Bounds of <paramref name="renderers"/> in this beacon's local space (body at rest).</summary>
+        Bounds LocalBounds(Renderer[] renderers)
+        {
+            bool any = false;
+            var bounds = new Bounds();
+            foreach (var r in renderers)
+            {
+                var wb = r.bounds;
+                for (int i = 0; i < 8; i++)
+                {
+                    var corner = wb.center + Vector3.Scale(wb.extents, new Vector3((i & 1) == 0 ? -1 : 1, (i & 2) == 0 ? -1 : 1, (i & 4) == 0 ? -1 : 1));
+                    var local = _body.InverseTransformPoint(corner);
+                    if (!any) { bounds = new Bounds(local, Vector3.zero); any = true; }
+                    else bounds.Encapsulate(local);
+                }
+            }
+            return bounds;
+        }
+
+        /// <summary>Stand-in built from primitives, used when no beacon model is assigned. Returns its top height.</summary>
+        float BuildPrimitive()
+        {
+            Part(PrimitiveType.Cylinder, _body, new Vector3(0f, -0.4f, 0f), new Vector3(0.18f, 0.9f, 0.18f), _bodyMat);   // spike
+            Part(PrimitiveType.Cylinder, _body, new Vector3(0f, 0.6f, 0f), new Vector3(1.6f, 0.08f, 1.6f), _bodyMat);    // base plate
+            Part(PrimitiveType.Cylinder, _body, new Vector3(0f, 2.2f, 0f), new Vector3(0.3f, 1.6f, 0.3f), _bodyMat);     // mast
+            for (int i = 0; i < 3; i++)                                                                                   // fins
+            {
+                var fin = Part(PrimitiveType.Cube, _body, Vector3.zero, new Vector3(0.08f, 1.4f, 0.7f), _bodyMat);
+                fin.localRotation = Quaternion.Euler(0f, i * 120f, 0f);
+                fin.localPosition = fin.localRotation * new Vector3(0f, 1.3f, 0.4f);
+            }
+            Part(PrimitiveType.Cylinder, _body, new Vector3(0f, 3.85f, 0f), new Vector3(0.7f, 0.06f, 0.7f), _bodyMat);   // collar
+
+            _head = new GameObject("Head").transform;
+            _head.SetParent(_body, false);
+            _head.localPosition = new Vector3(0f, 4.4f, 0f);
+            Part(PrimitiveType.Sphere, _head, Vector3.zero, Vector3.one * 0.6f, _headMat);
+            Part(PrimitiveType.Cube, _head, Vector3.zero, new Vector3(1.3f, 0.06f, 0.06f), _headMat);                     // spinning bars
+            Part(PrimitiveType.Cube, _head, Vector3.zero, new Vector3(0.06f, 0.06f, 1.3f), _headMat);
+            return 4.7f;
         }
 
         /// <summary>Filled disc made of rings; each vertex sits on the ground. Mesh is scaled in XZ to open the zone,
