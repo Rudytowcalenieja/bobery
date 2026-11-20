@@ -68,6 +68,22 @@ namespace Bobery.Rover
             return used / need;
         }
 
+        /// <summary>Takes up to <paramref name="litres"/> straight out of the tank (e.g. to build something). Returns litres used.</summary>
+        public float Drain(float litres)
+        {
+            if (litres <= 0f || IsEmpty) return 0f;
+            float used = Mathf.Min(litres, Fuel);
+            Fuel -= used;
+            Changed?.Invoke();
+            if (IsEmpty)
+            {
+                Fuel = 0f;
+                RanOut?.Invoke();
+                CheckGameOver();
+            }
+            return used;
+        }
+
         /// <summary>Pours up to <paramref name="litres"/> from the player's inventory into the tank. Returns litres added.</summary>
         public float RefuelFromInventory(float litres)
         {

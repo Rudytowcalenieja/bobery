@@ -48,8 +48,10 @@ namespace Bobery.Rover
         [Header("Beacons")]
         [Tooltip("How many charging beacons the player owns.")]
         [Min(0)] public int beaconCount = 4;
-        [Tooltip("Fuel (litres, from the inventory) spent to drop one beacon.")]
-        [Min(0f)] public float beaconCost = 10f;
+        [Tooltip("Percent of the rover's tank capacity spent to drop one beacon.")]
+        [Range(0f, 100f)] public float beaconFuelCostPercent = 10f;
+        [Tooltip("Percent of the rover's battery capacity spent to drop one beacon.")]
+        [Range(0f, 100f)] public float beaconBatteryCostPercent = 10f;
         [Tooltip("Radius of a beacon's charging zone (metres).")]
         [Min(1f)] public float beaconRadius = 15f;
         [Tooltip("Battery charge per second while the rover is inside a zone.")]
@@ -108,7 +110,7 @@ namespace Bobery.Rover
 
         // ---- beacons
         class BeaconMark { public RectTransform rt, zone, icon; public Image zoneImg, ringImg, iconImg; public Text label; }
-        class Slot { public RectTransform rt; public Image bg, glyph; public Text cross; }
+        class Slot { public RectTransform rt, barTrack, bar; public Image bg, glyph, barImg; public Text cross, timer; }
         readonly List<BeaconMark> _beaconMarks = new List<BeaconMark>();
         readonly List<Slot> _slots = new List<Slot>();
         RectTransform _beaconRoot, _placeGhost, _beaconActions;
@@ -152,7 +154,7 @@ namespace Bobery.Rover
             _hiddenLayer = LayerMask.NameToLayer("TransparentFX");
             if (_hiddenLayer < 0) _hiddenLayer = 1;
 
-            BeaconNetwork.Configure(beaconCount, PlayerInventory.Fuel, beaconCost, beaconRadius, beaconChargePerSecond, beaconCooldown);
+            BeaconNetwork.Configure(beaconCount, beaconFuelCostPercent / 100f, beaconBatteryCostPercent / 100f,beaconRadius, beaconChargePerSecond, beaconCooldown);
 
             BuildMapCamera();
             BuildUI();
@@ -468,7 +470,26 @@ namespace Bobery.Rover
                 var x = Label(rt, "×", 26, FontStyle.Bold, White);
                 Stretch(x.rectTransform, 0);
                 x.alignment = TextAnchor.MiddleCenter;
-                _slots.Add(new Slot { rt = rt, bg = bg, glyph = g, cross = x });
+
+                // Cooldown: countdown along the bottom + a thin bar that drains as it runs out.
+                var timer = Label(rt, "", 10, FontStyle.Bold, White, _mono);
+                var tr = timer.rectTransform;
+                tr.anchorMin = new Vector2(0, 0); tr.anchorMax = new Vector2(1, 0);
+                tr.pivot = new Vector2(0.5f, 0);
+                tr.offsetMin = new Vector2(0, 4); tr.offsetMax = new Vector2(0, 18);
+                timer.alignment = TextAnchor.MiddleCenter;
+                var barTrack = NewRect("CooldownBar", rt);
+                barTrack.anchorMin = new Vector2(0, 0); barTrack.anchorMax = new Vector2(1, 0);
+                barTrack.pivot = new Vector2(0, 0);
+                barTrack.offsetMin = new Vector2(3, 2); barTrack.offsetMax = new Vector2(-3, 4);
+                Img(barTrack, Faint);
+                var bar = NewRect("Fill", barTrack);
+                bar.anchorMin = new Vector2(0, 0); bar.anchorMax = new Vector2(0, 1);
+                bar.pivot = new Vector2(0, 0.5f);
+                bar.sizeDelta = Vector2.zero;
+                var barImg = Img(bar, White);
+
+                _slots.Add(new Slot { rt = rt, bg = bg, glyph = g, cross = x, timer = timer, barTrack = barTrack, bar = bar, barImg = barImg });
             }
 
             float ix = beaconCount > 0 ? Pad + beaconCount * (slotW + sg) + 4f : Pad;
@@ -586,6 +607,22 @@ namespace Bobery.Rover
                 s.glyph.color = light ? Color.black : isReady ? White : isDeployed ? new Color(1, 1, 1, 0.45f) : new Color(1, 1, 1, 0.12f);
                 s.cross.gameObject.SetActive(!isReady && !isDeployed);
                 s.cross.color = new Color(1, 1, 1, 0.5f);
+
+                // Deployed beacon on cooldown: glyph moves up to make room for the countdown.
+                var b = isDeployed ? list[i - ready] : null;
+                bool cool = b && b.IsCoolingDown;
+                s.timer.gameObject.SetActive(cool);
+                s.barTrack.gameObject.SetActive(cool);
+                s.glyph.rectTransform.offsetMin = new Vector2(7, cool ? 17 : 7);
+                s.glyph.rectTransform.offsetMax = new Vector2(-7, cool ? -3 : -7);
+                if (cool)
+                {
+                    float left = b.cooldown > 0f ? Mathf.Clamp01(b.CooldownLeft / b.cooldown) : 0f;
+                    s.timer.text = Beacon.Clock(b.CooldownLeft);
+                    s.timer.color = light ? Color.black : White;
+                    s.bar.sizeDelta = new Vector2(s.barTrack.rect.width * left, 0f);
+                    s.barImg.color = light ? Color.black : White;
+                }
             }
 
             _beaconCount.text = $"{ready}/{BeaconNetwork.Capacity}";
@@ -599,12 +636,13 @@ namespace Bobery.Rover
                 _destroyBtn.label.text = _destroyConfirm > 0f ? "CONFIRM?" : "DESTROY";
             }
             else if (_placing)
-                _beaconInfo.text = $"<color=#ffffff>CLICK THE MAP</color>\nCOST {BeaconNetwork.CostText}\nRMB / ESC CANCEL";
+                _beaconInfo.text = $"<color=#ffffff>CLICK THE MAP</color>\n{BeaconNetwork.CostText}\nRMB / ESC CANCEL";
             else
             {
-                string afford = BeaconNetwork.CanAfford ? "" : "  <color=#ffffff>(LOW)</color>";
+                string afford = BeaconNetwork.CanAfford ? ""
+                    : $"\n<color=#ffffff>NEED MORE {(!BeaconNetwork.HasFuel && !BeaconNetwork.HasBattery ? "FUEL+BATT" : !BeaconNetwork.HasFuel ? "FUEL" : "BATTERY")}</color>";
                 _beaconInfo.text = ready > 0
-                    ? $"COST {BeaconNetwork.CostText}{afford}\nZONE {BeaconNetwork.Radius:0} m · PICK SLOT"
+                    ? $"{BeaconNetwork.CostText}\nZONE {BeaconNetwork.Radius:0} m · PICK SLOT{afford}"
                     : deployed > 0 ? "NONE IN STOCK\nPICK ONE UP TO REUSE" : "NO BEACONS LEFT";
             }
         }
@@ -625,7 +663,7 @@ namespace Bobery.Rover
             {
                 _selected = null;
                 if (_placing) { _placing = false; return; }
-                if (!BeaconNetwork.CanAfford) { Toast($"Need {BeaconNetwork.CostText} to drop a beacon"); return; }
+                if (!BeaconNetwork.CanAfford) { Toast(BeaconNetwork.CostProblem); return; }
                 _placing = true;
                 Toast("Click the map to drop a beacon");
             }
@@ -1043,7 +1081,7 @@ namespace Bobery.Rover
                 if (ph.point.y < _waterY - 0.05f) { Toast("Can't drop a beacon into water"); return; }
                 if (!BeaconNetwork.TryPlace(ph.point, out _, out string err)) { Toast(err); _placing = false; return; }
                 _placing = false;
-                Toast($"Beacon inbound  (-{BeaconNetwork.CostText})");
+                Toast($"Beacon inbound  ({BeaconNetwork.CostText})");
                 return;
             }
             if (_hoverBeacon)

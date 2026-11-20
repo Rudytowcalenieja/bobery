@@ -13,9 +13,9 @@ namespace Bobery.Rover
     {
         /// <summary>Total beacons the player owns (deployed + in stock).</summary>
         public static int Capacity { get; private set; } = 4;
-        /// <summary>Inventory item spent to drop a beacon, and how much.</summary>
-        public static string CostItem { get; private set; } = PlayerInventory.Fuel;
-        public static float CostAmount { get; private set; } = 10f;
+        /// <summary>Share (0..1) of the rover's tank capacity and battery capacity spent to drop a beacon.</summary>
+        public static float FuelCostFraction { get; private set; } = 0.1f;
+        public static float BatteryCostFraction { get; private set; } = 0.1f;
         public static float Radius { get; private set; } = 15f;
         public static float ChargePerSecond { get; private set; } = 4f;
 
@@ -28,17 +28,40 @@ namespace Bobery.Rover
 
         public static event Action Changed;
 
-        public static string CostText => $"{CostAmount:0.#} {PlayerInventory.UnitOf(CostItem)} {PlayerInventory.NameOf(CostItem).ToUpperInvariant()}".Replace("  ", " ");
-        public static bool CanAfford => PlayerInventory.Get(CostItem) + 0.0001f >= CostAmount;
+        // The rover's own tank and battery pay for the drop.
+        static FuelTank _tank;
+        static RoverBattery _battery;
+        static void FindRover()
+        {
+            if (_tank && _battery) return;
+            var rover = UnityEngine.Object.FindAnyObjectByType<RoverController>();
+            if (!rover) return;
+            _tank = rover.GetComponent<FuelTank>();
+            _battery = rover.GetComponent<RoverBattery>();
+        }
+
+        public static float FuelCost { get { FindRover(); return _tank ? _tank.capacity * FuelCostFraction : 0f; } }
+        public static float BatteryCost { get { FindRover(); return _battery ? _battery.capacity * BatteryCostFraction : 0f; } }
+        public static bool HasFuel { get { FindRover(); return !_tank || _tank.Fuel + 0.0001f >= FuelCost; } }
+        public static bool HasBattery { get { FindRover(); return !_battery || _battery.Charge + 0.0001f >= BatteryCost; } }
+        public static bool CanAfford => HasFuel && HasBattery;
+        public static string CostText => $"FUEL -{FuelCostFraction * 100f:0}%  BATT -{BatteryCostFraction * 100f:0}%";
+        /// <summary>Why the player can't afford a beacon right now, or null.</summary>
+        public static string CostProblem =>
+            !HasFuel && !HasBattery ? $"Not enough fuel and battery: need {CostText}"
+            : !HasFuel ? $"Not enough fuel in the tank: need {FuelCostFraction * 100f:0}% ({FuelCost:0.#} L)"
+            : !HasBattery ? $"Not enough battery: need {BatteryCostFraction * 100f:0}%"
+            : null;
 
         public static float Cooldown { get; private set; } = 300f;
 
-        public static void Configure(int capacity, string costItem, float costAmount, float radius, float chargePerSecond, float cooldown)
+        public static void Configure(int capacity, float fuelCostFraction, float batteryCostFraction, float radius, float chargePerSecond, float cooldown)
         {
+            _tank = null; _battery = null; // rover may have been rebuilt (scene reload)
             Cooldown = Mathf.Max(0f, cooldown);
             Capacity = Mathf.Max(0, capacity);
-            CostItem = string.IsNullOrEmpty(costItem) ? PlayerInventory.Fuel : costItem;
-            CostAmount = Mathf.Max(0f, costAmount);
+            FuelCostFraction = Mathf.Clamp01(fuelCostFraction);
+            BatteryCostFraction = Mathf.Clamp01(batteryCostFraction);
             Radius = Mathf.Max(1f, radius);
             ChargePerSecond = Mathf.Max(0f, chargePerSecond);
             _deployed.RemoveAll(b => !b);
@@ -51,9 +74,11 @@ namespace Bobery.Rover
         {
             beacon = null;
             if (Available <= 0) { error = "No beacons left"; return false; }
-            if (!CanAfford) { error = $"Not enough {PlayerInventory.NameOf(CostItem).ToLowerInvariant()}: need {CostAmount:0.#} {PlayerInventory.UnitOf(CostItem)}"; return false; }
+            if (!CanAfford) { error = CostProblem; return false; }
 
-            PlayerInventory.Take(CostItem, CostAmount);
+            float fuel = FuelCost, charge = BatteryCost;
+            if (_battery) _battery.Drain(charge);
+            if (_tank) _tank.Drain(fuel);
             var go = new GameObject("Beacon");
             go.transform.position = groundPoint;
             beacon = go.AddComponent<Beacon>();
