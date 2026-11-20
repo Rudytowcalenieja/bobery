@@ -6,10 +6,13 @@ using UnityEngine.UI;
 namespace Bobery.Rover
 {
     /// <summary>
-    /// Placeholder rover interior (scene #2). Builds a simple cabin with a fuel tank, its own camera,
-    /// a HUD, and the player inventory window:
+    /// Rover interior (scene #2): a cabin with a fuel tank, its own camera, a HUD, and the player
+    /// inventory window:
     ///   I   – open / close inventory (pour fuel into the tank from there)
     ///   Esc – close inventory, or leave the rover
+    /// The cabin geometry lives in the scene (Bobery > Build Rover Interior Geometry) so it can be
+    /// edited by hand; only the HUD is built at runtime. If the scene has no geometry yet
+    /// (no camera assigned), a placeholder cabin is built at runtime instead.
     /// Works standalone too (open the scene directly) — then there's just no rover tank to fill.
     /// </summary>
     public class InteriorRoom : MonoBehaviour
@@ -17,11 +20,19 @@ namespace Bobery.Rover
         [Tooltip("Litres poured per click of the small pour button.")]
         public float pourStep = 10f;
 
+        [Header("Scene references")]
+        [Tooltip("Camera that renders the cabin. Its rotation is the resting view; the mouse adds a little parallax.")]
+        public Camera interiorCamera;
+        [Tooltip("Glowing fuel level bar. Its size/position in the scene = a FULL tank; it shrinks from the bottom as fuel drops.")]
+        public Transform fuelLevel;
+
         FuelTank _tank;
         Camera _cam;
+        Quaternion _camBaseRot;
         Canvas _canvasScaler;
         Transform _fuelLevel;
-        float _fuelLevelMaxHeight;
+        float _fuelLevelMaxHeight, _fuelLevelBottom;
+        Vector3 _fuelLevelFullScale;
 
         // HUD
         readonly UIButtons _hudButtons = new UIButtons();
@@ -52,7 +63,22 @@ namespace Bobery.Rover
             var rover = FindAnyObjectByType<RoverController>();
             if (rover) _tank = rover.GetComponent<FuelTank>();
 
-            BuildRoom();
+            if (!interiorCamera)
+            {
+                var built = BuildRoomGeometry(transform, CreateMaterials());
+                interiorCamera = built.cam;
+                fuelLevel = built.level;
+            }
+            _cam = interiorCamera;
+            if (_cam) _camBaseRot = _cam.transform.localRotation;
+            _fuelLevel = fuelLevel;
+            if (_fuelLevel)
+            {
+                _fuelLevelFullScale = _fuelLevel.localScale;
+                _fuelLevelMaxHeight = _fuelLevelFullScale.y;
+                _fuelLevelBottom = _fuelLevel.localPosition.y - _fuelLevelMaxHeight * 0.5f;
+            }
+
             BuildHud();
             BuildInventory();
             PlayerInventory.Changed += RebuildSlots;
@@ -64,21 +90,45 @@ namespace Bobery.Rover
 
         // ================================================================ room (placeholder geometry)
 
-        void BuildRoom()
+        public struct RoomMaterials
+        {
+            public Material wall, floor, panel, dark, glow;
+        }
+
+        /// <summary>New (unsaved) materials for the placeholder cabin. The editor saves these as assets.</summary>
+        public static RoomMaterials CreateMaterials()
         {
             var lit = Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard");
-            Material Mat(Color c)
+            Material Mat(string name, Color c)
             {
-                var m = new Material(lit) { color = c };
+                var m = new Material(lit) { name = name, color = c };
                 if (m.HasProperty("_BaseColor")) m.SetColor("_BaseColor", c);
                 return m;
             }
-            var wall = Mat(new Color(0.16f, 0.16f, 0.17f));
-            var floor = Mat(new Color(0.1f, 0.1f, 0.11f));
-            var panel = Mat(new Color(0.85f, 0.85f, 0.85f));
-            var dark = Mat(new Color(0.05f, 0.05f, 0.05f));
-            var glow = Mat(Color.white);
-            if (glow.HasProperty("_EmissionColor")) { glow.EnableKeyword("_EMISSION"); glow.SetColor("_EmissionColor", Color.white * 1.5f); }
+            var mats = new RoomMaterials
+            {
+                wall = Mat("InteriorWall", new Color(0.16f, 0.16f, 0.17f)),
+                floor = Mat("InteriorFloor", new Color(0.1f, 0.1f, 0.11f)),
+                panel = Mat("InteriorPanel", new Color(0.85f, 0.85f, 0.85f)),
+                dark = Mat("InteriorDark", new Color(0.05f, 0.05f, 0.05f)),
+                glow = Mat("InteriorGlow", Color.white),
+            };
+            if (mats.glow.HasProperty("_EmissionColor"))
+            {
+                mats.glow.EnableKeyword("_EMISSION");
+                mats.glow.globalIlluminationFlags = MaterialGlobalIlluminationFlags.RealtimeEmissive;
+                mats.glow.SetColor("_EmissionColor", Color.white * 1.5f);
+            }
+            return mats;
+        }
+
+        /// <summary>Builds the placeholder cabin (8 x 3 x 6 m) under <paramref name="parent"/>.</summary>
+        public static (Camera cam, Transform level) BuildRoomGeometry(Transform parent, RoomMaterials mats)
+        {
+            var wall = mats.wall; var floor = mats.floor; var panel = mats.panel; var dark = mats.dark; var glow = mats.glow;
+
+            var transform = new GameObject("Cabin").transform;
+            transform.SetParent(parent, false);
 
             Transform Box(string n, Vector3 pos, Vector3 size, Material m)
             {
@@ -118,19 +168,21 @@ namespace Bobery.Rover
             shell.transform.localPosition = new Vector3(0, 1.3f, 0);
             shell.transform.localScale = new Vector3(1.2f, 1.25f, 1.2f);
             shell.GetComponent<Renderer>().sharedMaterial = dark;
-            _fuelLevelMaxHeight = 2.3f;
+            const float levelMax = 2.3f;
             // Level gauge: a glowing strip on the front of the tank, facing the camera.
             var gaugeBack = GameObject.CreatePrimitive(PrimitiveType.Cube);
             gaugeBack.name = "GaugeBack";
             gaugeBack.transform.SetParent(tankRoot, false);
-            gaugeBack.transform.localPosition = new Vector3(0, 0.15f + _fuelLevelMaxHeight * 0.5f, -0.6f);
-            gaugeBack.transform.localScale = new Vector3(0.34f, _fuelLevelMaxHeight + 0.08f, 0.04f);
+            gaugeBack.transform.localPosition = new Vector3(0, 0.15f + levelMax * 0.5f, -0.6f);
+            gaugeBack.transform.localScale = new Vector3(0.34f, levelMax + 0.08f, 0.04f);
             gaugeBack.GetComponent<Renderer>().sharedMaterial = wall;
+            // Level bar at full height; at runtime it shrinks from the bottom.
             var level = GameObject.CreatePrimitive(PrimitiveType.Cube);
             level.name = "Level";
             level.transform.SetParent(tankRoot, false);
+            level.transform.localPosition = new Vector3(0, 0.15f + levelMax * 0.5f, -0.63f);
+            level.transform.localScale = new Vector3(0.26f, levelMax, 0.06f);
             level.GetComponent<Renderer>().sharedMaterial = glow;
-            _fuelLevel = level.transform;
             Box("Pipe", new Vector3(2.5f, 2.75f, 1.2f), new Vector3(0.15f, 0.15f, 1.8f), panel);
 
             // Lights
@@ -148,13 +200,14 @@ namespace Bobery.Rover
             camGo.transform.SetParent(transform, false);
             camGo.transform.localPosition = new Vector3(0, 1.7f, -2.6f);
             camGo.transform.localRotation = Quaternion.Euler(12f, 0, 0);
-            _cam = camGo.AddComponent<Camera>();
-            _cam.fieldOfView = 70f;
-            _cam.clearFlags = CameraClearFlags.SolidColor;
-            _cam.backgroundColor = Color.black;
-            _cam.nearClipPlane = 0.05f;
+            var cam = camGo.AddComponent<Camera>();
+            cam.fieldOfView = 70f;
+            cam.clearFlags = CameraClearFlags.SolidColor;
+            cam.backgroundColor = Color.black;
+            cam.nearClipPlane = 0.05f;
             camGo.AddComponent<AudioListener>();
             camGo.tag = "MainCamera";
+            return (cam, level.transform);
         }
 
         // ================================================================ HUD
@@ -430,9 +483,10 @@ namespace Bobery.Rover
             {
                 float f = _tank ? _tank.Fraction : 0f;
                 float h = Mathf.Max(0.001f, _fuelLevelMaxHeight * f);
-                var target = new Vector3(0.26f, h, 0.06f);
+                var target = new Vector3(_fuelLevelFullScale.x, h, _fuelLevelFullScale.z);
                 _fuelLevel.localScale = Vector3.Lerp(_fuelLevel.localScale, target, 1f - Mathf.Exp(-6f * Time.deltaTime));
-                _fuelLevel.localPosition = new Vector3(0, 0.15f + _fuelLevel.localScale.y * 0.5f, -0.63f);
+                var p = _fuelLevel.localPosition;
+                _fuelLevel.localPosition = new Vector3(p.x, _fuelLevelBottom + _fuelLevel.localScale.y * 0.5f, p.z);
             }
             if (_cam)
             {
@@ -446,7 +500,7 @@ namespace Bobery.Rover
                 var m = Mouse.current;
                 Vector2 p = m != null ? m.position.ReadValue() : new Vector2(Screen.width, Screen.height) * 0.5f;
                 Vector2 n = new Vector2(p.x / Mathf.Max(1, Screen.width) - 0.5f, p.y / Mathf.Max(1, Screen.height) - 0.5f);
-                var target = Quaternion.Euler(12f - n.y * 6f, n.x * 10f, 0f);
+                var target = _camBaseRot * Quaternion.Euler(-n.y * 6f, n.x * 10f, 0f);
                 _cam.transform.localRotation = Quaternion.Slerp(_cam.transform.localRotation, target, 1f - Mathf.Exp(-4f * Time.deltaTime));
             }
         }
