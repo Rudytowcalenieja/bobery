@@ -81,9 +81,36 @@ namespace Bobery.Rover
 
         // ================================================================ grid build
 
+        /// <summary>Build the grid once and reuse it (much cheaper for frequent requests, e.g. enemies).
+        /// Call <see cref="Invalidate"/> if the terrain changes.</summary>
+        public bool cacheGrid;
+        bool _built;
+        public void Invalidate() => _built = false;
+
+        // What the current grid was built from; when nothing changed the grid is reused.
+        int _builtVersion = -1;
+        float _builtCell, _builtClearance, _builtSlope;
+        Matrix4x4 _builtXform;
+
         void Build()
         {
+            if (cacheGrid && _built && _n > 0) return;
             if (!_terrain) _terrain = Object.FindAnyObjectByType<Bobery.Terrain.TerrainGenerator>();
+
+            // Building the grid samples the full terrain (tens of thousands of cells) and is far too slow
+            // to redo on every request. With a terrain it only changes when the terrain or settings do.
+            if (_terrain && _built && _n > 0
+                && _builtVersion == _terrain.Version
+                && _builtCell == cellSize && _builtClearance == clearance && _builtSlope == maxSlope
+                && _builtXform == _terrain.transform.localToWorldMatrix)
+                return;
+            _built = true;
+            if (_terrain)
+            {
+                _builtVersion = _terrain.Version;
+                _builtCell = cellSize; _builtClearance = clearance; _builtSlope = maxSlope;
+                _builtXform = _terrain.transform.localToWorldMatrix;
+            }
 
             float size;
             Vector3 center;
@@ -134,6 +161,12 @@ namespace Bobery.Rover
                     float hx = Mathf.Abs(H(x + 1, z) - H(x - 1, z)) * 0.5f;
                     float hz = Mathf.Abs(H(x, z + 1) - H(x, z - 1)) * 0.5f;
                     b = Mathf.Max(hx, hz) > maxRise;
+                }
+                if (!b && _terrain)
+                {
+                    // Outpost walls, buildings and props.
+                    Vector3 l = _terrain.transform.InverseTransformPoint(_origin + new Vector3(x * _cell, 0f, z * _cell));
+                    b = _terrain.IsObstacle(l.x, l.z, _cell * 0.5f);
                 }
                 raw[i] = b;
             }

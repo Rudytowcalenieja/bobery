@@ -113,13 +113,7 @@ namespace Bobery.Rover
         /// <summary>Plans a route and starts driving. Returns false when there's no way to get there.</summary>
         public bool SetDestination(Vector3 worldPoint)
         {
-            _pathfinder ??= new RoverPathfinder();
-            _pathfinder.cellSize = pathCellSize;
-            _pathfinder.maxSlope = maxSlope;
-            _pathfinder.clearance = waterClearance > 0f ? waterClearance : HalfWidth();
-            _pathfinder.groundMask = groundMask;
-            _pathfinder.ignore = transform;
-
+            ConfigurePathfinder();
             var tmp = new List<Vector3>();
             if (!_pathfinder.FindPath(transform.position, worldPoint, tmp) || tmp.Count == 0) return false;
 
@@ -129,6 +123,24 @@ namespace Bobery.Rover
             _destination = _path[_path.Count - 1];
             _hasDestination = true;
             return true;
+        }
+
+        void ConfigurePathfinder()
+        {
+            _pathfinder ??= new RoverPathfinder();
+            _pathfinder.cellSize = pathCellSize;
+            _pathfinder.maxSlope = maxSlope;
+            _pathfinder.clearance = waterClearance > 0f ? waterClearance : HalfWidth();
+            _pathfinder.groundMask = groundMask;
+            _pathfinder.ignore = transform;
+        }
+
+        // Build the path grid during loading so the first map click doesn't hitch.
+        System.Collections.IEnumerator Start()
+        {
+            yield return null; // let the model fit itself first (affects clearance)
+            ConfigurePathfinder();
+            _pathfinder.IsWalkable(transform.position);
         }
 
         public void Stop()
@@ -183,6 +195,12 @@ namespace Bobery.Rover
 
             // Battery: powers the map and weapons, recharged only by beacons.
             if (!GetComponent<RoverBattery>()) gameObject.AddComponent<RoverBattery>();
+
+            // Hull: enemy shots damage it, leaks are repaired from the inside.
+            if (!GetComponent<RoverHealth>()) gameObject.AddComponent<RoverHealth>();
+
+            // Enemies hunting the rover and its beacons.
+            if (!GetComponent<EnemySpawner>()) gameObject.AddComponent<EnemySpawner>();
         }
 
         void Update()

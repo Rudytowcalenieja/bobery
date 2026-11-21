@@ -17,7 +17,7 @@ namespace Bobery.Terrain
         [Tooltip("World size of the map (X and Z) in metres.")]
         [Min(10f)] public float mapSize = 240f;
         [Tooltip("Vertices per side. Higher = smoother.")]
-        [Range(32, 512)] public int resolution = 241;
+        [Range(32, 1024)] public int resolution = 241;
 
         [Header("Seed")]
         public int seed = 1337;
@@ -39,7 +39,7 @@ namespace Bobery.Terrain
         public float detailHeight = 0.25f;
 
         [Header("Lakes")]
-        [Range(0, 20)] public int lakeCount = 5;
+        [Range(0, 40)] public int lakeCount = 5;
         public Vector2 lakeRadius = new Vector2(9f, 18f);
         [Tooltip("How deep below the water surface a lake bottom goes.")]
         public float lakeDepth = 3f;
@@ -49,7 +49,7 @@ namespace Bobery.Terrain
         public float lakeEdgeMargin = 25f;
 
         [Header("Craters")]
-        [Range(0, 40)] public int craterCount = 0;
+        [Range(0, 200)] public int craterCount = 0;
         public Vector2 craterRadius = new Vector2(4f, 12f);
         [Tooltip("Crater depth as a fraction of its radius.")]
         [Range(0f, 0.6f)] public float craterDepth = 0.25f;
@@ -57,6 +57,11 @@ namespace Bobery.Terrain
         [Range(0f, 0.3f)] public float craterRim = 0.08f;
         [Tooltip("Keep crater floors this far above the water so they stay dry.")]
         public float craterMinAboveWater = 0.3f;
+
+        [Header("Keep Clear")]
+        [Tooltip("Outposts are never placed near these (e.g. the player's start).")]
+        public Transform[] keepClearOf = new Transform[0];
+        public float keepClearRadius = 60f;
 
         [Header("Water")]
         public float waterLevel = 0f;
@@ -81,7 +86,18 @@ namespace Bobery.Terrain
 
         readonly List<Lake> _lakes = new List<Lake>();
         readonly List<Lake> _craters = new List<Lake>();
+        readonly List<OutpostSite> _sites = new List<OutpostSite>();
+        OutpostGenerator _outposts;
         Vector2 _noiseOffset;
+
+        /// <summary>Where outposts were placed this generation (terrain-local XZ, pad height).</summary>
+        public IReadOnlyList<OutpostSite> OutpostSites => _sites;
+
+        /// <summary>True if local XZ is inside a building, wall, tower or prop of an outpost.</summary>
+        public bool IsObstacle(float x, float z, float padding = 0f)
+        {
+            return _outposts && _outposts.IsObstacle(x, z, padding);
+        }
         Mesh _terrainMesh;
         Mesh _waterMesh;
         bool _dirty;
@@ -105,7 +121,10 @@ namespace Bobery.Terrain
             Generate();
         }
 
-        void OnValidate()
+        void OnValidate() => MarkDirty();
+
+        /// <summary>Regenerate on the next update (safe to call from OnValidate).</summary>
+        public void MarkDirty()
         {
             // Mesh changes are not allowed inside OnValidate – defer to Update.
             _dirty = true;
@@ -129,12 +148,18 @@ namespace Bobery.Terrain
             DestroySafe(_waterMesh);
         }
 
+        /// <summary>Bumped every time the terrain is regenerated (lets caches know they're stale).</summary>
+        public int Version { get; private set; }
+
         [ContextMenu("Generate")]
         public void Generate()
         {
+            Version++;
+            _outposts = GetComponent<OutpostGenerator>();
             SetupLakes();
             BuildTerrain();
             BuildWater();
+            if (_outposts) _outposts.Build(this, _sites);
         }
 
         [ContextMenu("Randomize Seed")]
@@ -176,7 +201,9 @@ namespace Bobery.Terrain
                 _lakes.Add(new Lake { center = c, radius = r, phase = (float)rng.NextDouble() * 100f });
             }
 
-            // Craters: may overlap each other (looks like repeated impacts) but avoid lakes.
+            PickOutpostSites(rng);
+
+            // Craters: may overlap each other (looks like repeated impacts) but avoid lakes and outposts.
             _craters.Clear();
             attempts = 0;
             while (_craters.Count < craterCount && attempts < craterCount * 50)
@@ -190,8 +217,77 @@ namespace Bobery.Terrain
                 {
                     if (Vector2.Distance(c, lake.center) < (lake.radius * 1.9f + r * 2f)) { ok = false; break; }
                 }
+                foreach (var site in _sites)
+                {
+                    if (!ok) break;
+                    if (Vector2.Distance(c, site.center) < site.radius + site.blend + r * 2.3f) ok = false;
+                }
                 if (!ok) continue;
                 _craters.Add(new Lake { center = c, radius = r, phase = (float)rng.NextDouble() * 100f });
+            }
+        }
+
+        void PickOutpostSites(System.Random rng)
+        {
+            _sites.Clear();
+            if (!_outposts || !_outposts.enabled || _outposts.outpostCount <= 0) return;
+
+            float half = mapSize * 0.5f;
+            float pad = _outposts.padRadius;
+            float blend = _outposts.padBlend;
+            float margin = Mathf.Max(_outposts.edgeMargin, pad + blend);
+            float min = -half + margin, max = half - margin;
+            if (max <= min) return;
+
+            // Keep-clear points in terrain-local XZ.
+            var clear = new List<Vector2>();
+            if (keepClearOf != null)
+                foreach (var t in keepClearOf)
+                    if (t)
+                    {
+                        var l = transform.InverseTransformPoint(t.position);
+                        clear.Add(new Vector2(l.x, l.z));
+                    }
+
+            int attempts = 0;
+            while (_sites.Count < _outposts.outpostCount && attempts < _outposts.outpostCount * 200)
+            {
+                attempts++;
+                var c = new Vector2(Mathf.Lerp(min, max, (float)rng.NextDouble()),
+                                    Mathf.Lerp(min, max, (float)rng.NextDouble()));
+                bool ok = true;
+                foreach (var lake in _lakes)
+                    if (Vector2.Distance(c, lake.center) < lake.radius * 1.9f * (1f + shoreNoise) + pad + blend + 4f) { ok = false; break; }
+                if (ok)
+                    foreach (var s in _sites)
+                        if (Vector2.Distance(c, s.center) < _outposts.minSpacing) { ok = false; break; }
+                if (ok)
+                    foreach (var p in clear)
+                        if (Vector2.Distance(c, p) < keepClearRadius + pad) { ok = false; break; }
+                if (!ok) continue;
+
+                // Prefer reasonably flat ground so the pad doesn't make a cliff.
+                float hMin = float.MaxValue, hMax = float.MinValue, hSum = 0f;
+                const int samples = 9;
+                for (int i = 0; i < samples; i++)
+                {
+                    Vector2 p = i == 0 ? c : c + new Vector2(Mathf.Cos(i * Mathf.PI * 0.25f), Mathf.Sin(i * Mathf.PI * 0.25f)) * pad;
+                    float h = HillHeight(p.x, p.y);
+                    hMin = Mathf.Min(hMin, h); hMax = Mathf.Max(hMax, h); hSum += h;
+                }
+                // Relax the flatness rule if we're struggling to find spots.
+                float allowed = _outposts.maxPadHeightDifference * (attempts > _outposts.outpostCount * 100 ? 2f : 1f);
+                if (hMax - hMin > allowed) continue;
+
+                _sites.Add(new OutpostSite
+                {
+                    center = c,
+                    height = hSum / samples,
+                    radius = pad,
+                    blend = blend,
+                    yaw = (float)rng.NextDouble() * 360f,
+                    seed = rng.Next(),
+                });
             }
         }
 
@@ -199,6 +295,8 @@ namespace Bobery.Terrain
         float CraterOffset(Lake crater, float x, float z)
         {
             Vector2 dv = new Vector2(x, z) - crater.center;
+            float maxR = crater.radius * 1.15f * 2f;
+            if (dv.sqrMagnitude >= maxR * maxR) return 0f; // cheap early out
             float angle = Mathf.Atan2(dv.y, dv.x);
             float wobble = 1f + 0.15f * (Mathf.PerlinNoise(Mathf.Cos(angle) + crater.phase, Mathf.Sin(angle) + crater.phase) - 0.5f) * 2f;
             float r = crater.radius * wobble;
@@ -227,8 +325,8 @@ namespace Bobery.Terrain
             return sum / norm; // 0..1
         }
 
-        /// <summary>Terrain height (local space) at local XZ.</summary>
-        public float SampleHeight(float x, float z)
+        /// <summary>Rolling hills + small bumps only (no craters, lakes or outpost pads).</summary>
+        float HillHeight(float x, float z)
         {
             // Rolling hills – always above water.
             float n = Mathf.Clamp01(Fbm(x, z));
@@ -237,6 +335,24 @@ namespace Bobery.Terrain
 
             // Small bumps.
             h += (Mathf.PerlinNoise(x * 0.15f + _noiseOffset.y, z * 0.15f + _noiseOffset.x) - 0.5f) * detailHeight * 2f;
+            return h;
+        }
+
+        /// <summary>Terrain height (local space) at local XZ.</summary>
+        public float SampleHeight(float x, float z)
+        {
+            float h = HillHeight(x, z);
+
+            // Flat pads under outposts, eased into the surrounding ground.
+            foreach (var site in _sites)
+            {
+                float dx = x - site.center.x, dz = z - site.center.y;
+                float outer = site.radius + site.blend;
+                float d2 = dx * dx + dz * dz;
+                if (d2 >= outer * outer) continue;
+                float t = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(site.radius, outer, Mathf.Sqrt(d2)));
+                h = Mathf.Lerp(site.height, h, t);
+            }
 
             // Impact craters.
             if (_craters.Count > 0)
@@ -251,6 +367,8 @@ namespace Bobery.Terrain
             foreach (var lake in _lakes)
             {
                 Vector2 d = new Vector2(x, z) - lake.center;
+                float maxOuter = lake.radius * (1f + shoreNoise) * 1.9f;
+                if (d.sqrMagnitude >= maxOuter * maxOuter) continue; // cheap early out
                 float dist = d.magnitude;
                 float angle = Mathf.Atan2(d.y, d.x);
                 float wobble = 1f + shoreNoise * (Mathf.PerlinNoise(Mathf.Cos(angle) * 1.5f + lake.phase,

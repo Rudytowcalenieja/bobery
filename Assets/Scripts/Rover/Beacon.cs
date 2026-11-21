@@ -53,9 +53,13 @@ namespace Bobery.Rover
             : !HasBattery ? $"Not enough battery: need {BatteryCostFraction * 100f:0}%"
             : null;
 
-        public static float Cooldown { get; private set; } = 300f;
+        public static float Cooldown { get; private set; } = 180f;
         /// <summary>Seconds it takes to pick a beacon up (the rover has to stay in its zone). 0 = instant.</summary>
         public static float PickUpTime { get; set; } = 10f;
+        /// <summary>Enemy shots a beacon survives.</summary>
+        public static int MaxHits { get; set; } = 5;
+        /// <summary>Seconds the rover is busy deploying a beacon (nothing else can be done meanwhile).</summary>
+        public static float CastTime { get; set; } = 3f;
         /// <summary>3D model used for placed beacons (Models/beacon). Null → a primitive stand-in is built.</summary>
         public static GameObject Model { get; set; }
 
@@ -90,6 +94,7 @@ namespace Bobery.Rover
             beacon.chargePerSecond = ChargePerSecond;
             beacon.cooldown = Cooldown;
             beacon.pickUpTime = PickUpTime;
+            beacon.maxHits = MaxHits;
             _deployed.Add(beacon);
             Changed?.Invoke();
             error = null;
@@ -152,6 +157,8 @@ namespace Bobery.Rover
             _deployed.Clear();
             Destroyed = 0;
             Capacity = 4;
+            MaxHits = 5;
+            CastTime = 3f;
             Changed = null;
             Model = null;
         }
@@ -180,7 +187,7 @@ namespace Bobery.Rover
         public bool RoverInside { get; private set; }
 
         [Tooltip("Seconds the beacon needs after a charging session before it can charge again.")]
-        public float cooldown = 300f;
+        public float cooldown = 180f;
         public float CooldownLeft { get; private set; }
         public bool IsCoolingDown => CooldownLeft > 0f;
 
@@ -205,8 +212,30 @@ namespace Bobery.Rover
             PickUpLeft = 0f;
             RoverHud.Notify(why);
         }
+        [Tooltip("Enemy shots this beacon survives.")]
+        public int maxHits = 5;
+        public int Hits { get; private set; }
+        public int HitsLeft => Mathf.Max(0, maxHits - Hits);
+        public bool IsDamaged => Hits > 0;
+        float _hitFlash;
+
+        /// <summary>An enemy shot landed. The beacon is destroyed for good after <see cref="maxHits"/> hits.</summary>
+        public void TakeHit()
+        {
+            if (!IsActive) return;
+            Hits++;
+            _hitFlash = 1f;
+            if (Hits >= maxHits)
+            {
+                RoverHud.Notify("Beacon destroyed by enemy fire");
+                BeaconNetwork.DestroyBeacon(this);
+                return;
+            }
+            RoverHud.Notify($"Beacon under attack: {HitsLeft}/{maxHits} HP");
+        }
+
         float _delivered;
-        TextMesh _timer;
+        TextMesh _timer, _hp;
 
         float PinDepth = 0.6f; // how far the body sinks into the ground on landing
         const int Rings = 10, Segments = 72;
@@ -355,6 +384,29 @@ namespace Bobery.Rover
             _head.localRotation = Quaternion.Euler(0f, Time.time * (IsPickingUp ? 400f : charging ? 240f : IsCoolingDown ? 10f : 60f), 0f);
 
             UpdateTimerLabel();
+            UpdateHpLabel();
+        }
+
+        /// <summary>Hit points floating above the beacon once it has taken damage; the head flashes red on each hit.</summary>
+        void UpdateHpLabel()
+        {
+            if (_hitFlash > 0f)
+            {
+                _hitFlash = Mathf.Max(0f, _hitFlash - Time.deltaTime * 2.5f);
+                SetColor(_headMat, Color.Lerp(_headMat.color, new Color(1f, 0.2f, 0.15f), _hitFlash));
+            }
+            if (!_hp) return;
+            bool show = IsDamaged && Phase == State.Active;
+            if (_hp.gameObject.activeSelf != show) _hp.gameObject.SetActive(show);
+            if (!show) return;
+            _hp.text = new string('|', HitsLeft) + "<color=#40404080>" + new string('|', Hits) + "</color>";
+            var cam = Camera.main;
+            if (cam)
+            {
+                _hp.transform.rotation = Quaternion.LookRotation(_hp.transform.position - cam.transform.position, Vector3.up);
+                float d = Vector3.Distance(cam.transform.position, _hp.transform.position);
+                _hp.transform.localScale = Vector3.one * Mathf.Clamp(d / 30f, 0.6f, 3f);
+            }
         }
 
         /// <summary>Countdown floating above the beacon, facing the camera. Hidden when the beacon is ready.</summary>
@@ -391,6 +443,7 @@ namespace Bobery.Rover
             SetAlpha(_edgeMat, 0.7f * close);
             SetAlpha(_pulseMat, 0f);
             if (_timer) _timer.gameObject.SetActive(false);
+            if (_hp) _hp.gameObject.SetActive(false);
             _body.localPosition = Vector3.up * Mathf.Lerp(-PinDepth, dropHeight, k * k);
             _body.localRotation = Quaternion.Euler(0f, k * 540f, 0f);
             SetHeadGlow(1f);
@@ -435,6 +488,7 @@ namespace Bobery.Rover
             Phase = State.Exploding;
             _t = 0f;
             if (_timer) _timer.gameObject.SetActive(false);
+            if (_hp) _hp.gameObject.SetActive(false);
             Vector3 at = _body.position;
             // The beacon itself becomes debris.
             foreach (Transform part in _body.GetComponentsInChildren<Transform>())
@@ -534,6 +588,22 @@ namespace Bobery.Rover
             _timer.fontStyle = FontStyle.Bold;
             _timer.color = color;
             timerGo.SetActive(false);
+
+            // ---- hit points, just under the countdown
+            var hpGo = new GameObject("HitPoints");
+            hpGo.transform.SetParent(transform, false);
+            hpGo.transform.localPosition = new Vector3(0f, top + 0.9f, 0f);
+            _hp = hpGo.AddComponent<TextMesh>();
+            _hp.font = RoverUI.Mono;
+            hpGo.GetComponent<MeshRenderer>().sharedMaterial = _hp.font.material;
+            _hp.fontSize = 64;
+            _hp.characterSize = 0.07f;
+            _hp.anchor = TextAnchor.LowerCenter;
+            _hp.alignment = TextAlignment.Center;
+            _hp.fontStyle = FontStyle.Bold;
+            _hp.richText = true;
+            _hp.color = new Color(1f, 0.32f, 0.32f);
+            hpGo.SetActive(false);
             _zone.localScale = _edge.localScale = _pulse.localScale = new Vector3(0f, 1f, 0f);
         }
 

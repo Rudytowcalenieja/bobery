@@ -7,7 +7,9 @@ using UnityEngine;
 namespace Bobery.Rover.EditorTools
 {
     /// <summary>
-    /// Bobery > Create Rover        – builds the rover from Models/earthMoverBeta.fbx.
+    /// Bobery > Create Rover         – builds the rover from Models/rover.fbx.
+    /// Bobery > Replace Rover Model  – swaps the "Model" child of the existing rover for Models/rover.fbx,
+    ///                                 keeping the rover's settings and its size on the map.
     /// Bobery > Refit Rover Collider – refits the box collider of the selected (or only) rover,
     ///                                 e.g. after rotating/scaling the "Model" child.
     /// The collider is fitted to the actual skinned mesh across the whole walk animation,
@@ -15,7 +17,7 @@ namespace Bobery.Rover.EditorTools
     /// </summary>
     public static class RoverMenu
     {
-        const string ModelPath = "Assets/Models/earthMoverBeta.fbx";
+        const string ModelPath = "Assets/Models/rover.fbx";
         const string ControllerPath = "Assets/Models/Mover.controller";
         const string ClipName = "Armature|ArmatureAction";
         const string PhysMatPath = "Assets/Scripts/Rover/Materials/RoverWheel.physicMaterial";
@@ -88,6 +90,80 @@ namespace Bobery.Rover.EditorTools
                       "If it's facing sideways/backwards, rotate the 'Model' child around Y, then Bobery > Refit Rover Collider.", root);
             Selection.activeGameObject = root;
             EditorGUIUtility.PingObject(root);
+        }
+
+        [MenuItem("Bobery/Replace Rover Model")]
+        public static void ReplaceModel()
+        {
+            var rover = Selection.activeGameObject ? Selection.activeGameObject.GetComponentInParent<RoverController>() : null;
+            if (!rover) rover = Object.FindAnyObjectByType<RoverController>();
+            if (!rover)
+            {
+                EditorUtility.DisplayDialog("Replace Rover Model", "No rover found in the scene. Use Bobery > Create Rover.", "OK");
+                return;
+            }
+            var modelAsset = AssetDatabase.LoadAssetAtPath<GameObject>(ModelPath);
+            if (!modelAsset)
+            {
+                EditorUtility.DisplayDialog("Replace Rover Model", $"Model not found at {ModelPath}", "OK");
+                return;
+            }
+
+            var clip = PrepareClip();
+            var controller = PrepareController(clip);
+            var root = rover.transform;
+
+            // Old model: remember its footprint (root space) so the rover keeps its size on the map.
+            var oldAnimator = rover.GetComponentInChildren<Animator>();
+            var old = oldAnimator ? oldAnimator.gameObject : (root.childCount > 0 ? root.GetChild(0).gameObject : null);
+            float oldLength = old ? HorizontalSize(root, old) : 0f;
+            Quaternion oldRot = old ? old.transform.localRotation : Quaternion.identity;
+
+            var model = (GameObject)PrefabUtility.InstantiatePrefab(modelAsset, root);
+            Undo.RegisterCreatedObjectUndo(model, "Replace Rover Model");
+            model.name = "Model";
+            model.transform.SetSiblingIndex(old ? old.transform.GetSiblingIndex() : 0);
+            model.transform.localPosition = Vector3.zero;
+            model.transform.localRotation = oldRot;
+            float newLength = HorizontalSize(root, model);
+            if (oldLength > 0.01f && newLength > 0.01f)
+                model.transform.localScale = Vector3.one * (oldLength / newLength);
+
+            var animator = model.GetComponent<Animator>();
+            if (!animator) animator = model.AddComponent<Animator>();
+            animator.runtimeAnimatorController = controller;
+            animator.applyRootMotion = false;
+            animator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
+
+            if (old) Undo.DestroyObjectImmediate(old);
+
+            var box = rover.GetComponent<BoxCollider>();
+            if (!box) box = Undo.AddComponent<BoxCollider>(rover.gameObject);
+            Undo.RecordObject(box, "Replace Rover Model");
+            var b = FitCollider(root, model, box, clip);
+            Undo.RecordObject(rover, "Replace Rover Model");
+            rover.centerOfMassOffset = new Vector3(0f, -b.size.y * 0.3f, 0f);
+            var anim = rover.GetComponent<RoverAnimator>();
+            if (anim) { Undo.RecordObject(anim, "Replace Rover Model"); anim.animator = animator; }
+
+            UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(rover.gameObject.scene);
+            Debug.Log($"[Rover] Model replaced with {ModelPath}. Collider: {b.size.x:0.##} x {b.size.y:0.##} x {b.size.z:0.##} m.", rover);
+            Selection.activeGameObject = rover.gameObject;
+        }
+
+        /// <summary>Largest X/Z extent of the model's renderers, in the rover root's local space.</summary>
+        static float HorizontalSize(Transform root, GameObject model)
+        {
+            var rs = model.GetComponentsInChildren<Renderer>(true);
+            if (rs.Length == 0) return 0f;
+            bool init = false;
+            var b = new Bounds();
+            foreach (var r in rs)
+            {
+                Bounds lb = TransformBounds(r.bounds, p => root.InverseTransformPoint(p));
+                if (!init) { b = lb; init = true; } else b.Encapsulate(lb);
+            }
+            return Mathf.Max(b.size.x, b.size.z);
         }
 
         [MenuItem("Bobery/Add Map Panel")]
@@ -182,36 +258,49 @@ namespace Bobery.Rover.EditorTools
         /// <summary>Builds the cabin under the room with saved material assets and wires up the room's references.</summary>
         public static void BuildInteriorGeometry(InteriorRoom room)
         {
+            // Keep the crew member placed in the scene (it lives inside the Cabin).
+            var crew = room.GetComponentsInChildren<RepairCrew>(true);
+            var crewLocal = new (Vector3 pos, Quaternion rot)[crew.Length];
+            for (int i = 0; i < crew.Length; i++)
+            {
+                crewLocal[i] = (crew[i].transform.localPosition, crew[i].transform.localRotation);
+                crew[i].transform.SetParent(room.transform, true);
+            }
+
             var old = room.transform.Find("Cabin");
             if (old) Object.DestroyImmediate(old.gameObject);
 
-            var built = InteriorRoom.BuildRoomGeometry(room.transform, SaveInteriorMaterials());
-            Undo.RegisterCreatedObjectUndo(built.cam.transform.parent.gameObject, "Build Rover Interior");
+            var sitting = AssetDatabase.LoadAssetAtPath<GameObject>(InteriorCabin.SittingModelPath);
+            var built = InteriorCabin.Build(room.transform, SaveInteriorMaterials(), sitting);
+            var cabin = built.cam.transform.parent;
+            Undo.RegisterCreatedObjectUndo(cabin.gameObject, "Build Rover Interior");
+            for (int i = 0; i < crew.Length; i++)
+            {
+                crew[i].transform.SetParent(cabin, false);
+                crew[i].transform.SetLocalPositionAndRotation(crewLocal[i].pos, crewLocal[i].rot);
+            }
             room.interiorCamera = built.cam;
             room.fuelLevel = built.level;
             EditorUtility.SetDirty(room);
             UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(room.gameObject.scene);
         }
 
-        /// <summary>Reuses the material assets in Assets/Materials/RoverInterior, creating any that are missing.</summary>
-        static InteriorRoom.RoomMaterials SaveInteriorMaterials()
+        /// <summary>
+        /// Saves the cabin materials as assets in Assets/Materials/RoverInterior. Existing ones are kept
+        /// (so colour tweaks made in the editor survive a rebuild); missing ones are created.
+        /// </summary>
+        static Dictionary<string, Material> SaveInteriorMaterials()
         {
             if (!AssetDatabase.IsValidFolder(InteriorMaterialsFolder))
                 AssetDatabase.CreateFolder("Assets/Materials", "RoverInterior");
-            var fresh = InteriorRoom.CreateMaterials();
-            Material Keep(Material m)
+            var mats = new Dictionary<string, Material>();
+            foreach (var kv in InteriorCabin.CreateMaterials())
             {
-                string p = $"{InteriorMaterialsFolder}/{m.name}.mat";
+                string p = $"{InteriorMaterialsFolder}/{kv.Key}.mat";
                 var existing = AssetDatabase.LoadAssetAtPath<Material>(p);
-                if (existing) { Object.DestroyImmediate(m); return existing; }
-                AssetDatabase.CreateAsset(m, p);
-                return m;
+                if (existing) { Object.DestroyImmediate(kv.Value); mats[kv.Key] = existing; }
+                else { AssetDatabase.CreateAsset(kv.Value, p); mats[kv.Key] = kv.Value; }
             }
-            var mats = new InteriorRoom.RoomMaterials
-            {
-                wall = Keep(fresh.wall), floor = Keep(fresh.floor), panel = Keep(fresh.panel),
-                dark = Keep(fresh.dark), glow = Keep(fresh.glow),
-            };
             AssetDatabase.SaveAssets();
             return mats;
         }
@@ -367,7 +456,10 @@ namespace Bobery.Rover.EditorTools
             var clips = importer.clipAnimations;
             if (clips == null || clips.Length == 0) clips = importer.defaultClipAnimations;
 
-            bool changed = false;
+            // Blender scenes export their lights/cameras too (rover.fbx has an area light): keep just the rover.
+            bool changed = importer.importLights || importer.importCameras;
+            importer.importLights = false;
+            importer.importCameras = false;
             foreach (var c in clips)
             {
                 if (Normalize(c.name) != Normalize(ClipName) && Normalize(c.takeName) != Normalize(ClipName)) continue;
