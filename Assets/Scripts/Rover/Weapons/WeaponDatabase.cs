@@ -17,6 +17,8 @@ namespace Bobery.Rover
 
         [Tooltip("Weapon mounted on the rover when the game starts.")]
         public string startingWeapon = WeaponDef.AutoCannonId;
+        [Tooltip("Weapon handed out by the 1st, 2nd, 3rd... completed outpost (empty = nothing). See OutpostProgress.")]
+        public List<string> outpostRewards = new List<string> { WeaponDef.RailGunId, "", WeaponDef.RocketId };
         public List<WeaponDef> weapons = new List<WeaponDef>();
 
         static WeaponDatabase _instance;
@@ -45,11 +47,22 @@ namespace Bobery.Rover
         }
     }
 
+    public enum WeaponKind
+    {
+        /// <summary>Turret gun on the turret slot: aims at the mouse, fires shells while LMB is held.</summary>
+        Gun,
+        /// <summary>Rocket hung under the rover: dropped, flies up out of sight and falls on the clicked spot.</summary>
+        RocketStrike,
+    }
+
     [Serializable]
     public class WeaponDef
     {
         public const string AutoCannonId = "autoCannon";
         public const string RailGunId = "railGun";
+        public const string RocketId = "rocket";
+
+        public WeaponKind kind = WeaponKind.Gun;
 
         public string id;
         public string displayName;
@@ -81,6 +94,8 @@ namespace Bobery.Rover
         public float projectileSpeed = 150f;
         [Tooltip("Battery charge used per shot.")]
         public float batteryPerShot = 0.2f;
+        [Tooltip("If above 0: share of the battery's capacity used per shot instead (0.2 = 20%).")]
+        [Range(0f, 1f)] public float batteryFraction = 0f;
         [Tooltip("How fast the gun follows the mouse (degrees per second).")]
         public float turnSpeed = 70f;
 
@@ -91,7 +106,22 @@ namespace Bobery.Rover
         [Tooltip("How far the gun jumps back per shot (metres).")]
         public float recoilKick = 0.05f;
 
+        [Header("Rocket strike")]
+        [Tooltip("Enemies within this radius of the impact take damage (full at the centre, half at the edge).")]
+        public float blastRadius = 14f;
+        [Tooltip("The rover must be at least this far from the impact, or the blast hits it too.")]
+        public float safeDistance = 30f;
+        [Tooltip("Rover damage (share of its max hull) at point blank; falls to 0 at the safe distance.")]
+        [Range(0f, 1f)] public float selfDamageMax = 0.6f;
+        [Tooltip("Seconds until the next rocket is loaded.")]
+        public float reloadTime = 4f;
+        [Tooltip("How high (metres) the rocket climbs before it falls on the target.")]
+        public float flightHeight = 220f;
+
         public float FireInterval => fireRate > 0f ? 1f / fireRate : 1f;
+
+        /// <summary>Battery charge one shot costs on a battery of <paramref name="capacity"/>.</summary>
+        public float ShotCost(float capacity) => batteryFraction > 0f ? batteryFraction * capacity : batteryPerShot;
 
         public static List<WeaponDef> Defaults() => new List<WeaponDef>
         {
@@ -113,6 +143,7 @@ namespace Bobery.Rover
             {
                 id = RailGunId,
                 displayName = "RAILGUN",
+                unlockedAtStart = false, // reward from the 1st outpost
                 description = "Magnetic slug thrower. One slow, heavy shot that punches through turret armour.",
                 clipSpeed = 1f,
                 modelEuler = Vector3.zero,
@@ -122,6 +153,21 @@ namespace Bobery.Rover
                 fireRate = 0.6f, damage = 25f, range = 220f, spread = 0f, projectileSpeed = 400f,
                 batteryPerShot = 3f, turnSpeed = 40f,
                 tracerColor = new Color(0.45f, 0.85f, 1f), fxScale = 2.2f, recoilKick = 0.6f,
+            },
+            new WeaponDef
+            {
+                id = RocketId,
+                kind = WeaponKind.RocketStrike,
+                unlockedAtStart = false, // reward from the 3rd outpost
+                displayName = "ROCKET",
+                description = "Hangs under the rover. Click a spot: the rocket drops, climbs out of sight and falls on it. Keep the rover out of the blast.",
+                modelEuler = new Vector3(90f, 0f, 0f), // nose (+Y) to +Z
+                pivot = new Vector3(0f, 14.55f, 0f),   // middle of the body
+                sizeVsRover = 0.38f,
+                fireRate = 0.25f, damage = 80f, range = 160f, spread = 0f,
+                batteryFraction = 0.2f, turnSpeed = 0f,
+                blastRadius = 14f, safeDistance = 30f, selfDamageMax = 0.6f, reloadTime = 4f, flightHeight = 220f,
+                tracerColor = new Color(1f, 0.55f, 0.2f), fxScale = 2.5f, recoilKick = 0f,
             },
         };
     }

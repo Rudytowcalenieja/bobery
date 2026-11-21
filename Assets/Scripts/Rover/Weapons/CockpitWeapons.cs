@@ -295,7 +295,11 @@ namespace Bobery.Rover
             _detailText.text = $"{def.description}\n" +
                                $"<color=#8A9099>DMG</color> {def.damage:0.#}   <color=#8A9099>RATE</color> {def.fireRate:0.#}/s   " +
                                $"<color=#8A9099>DPS</color> {def.damage * def.fireRate:0.#}   <color=#8A9099>RANGE</color> {def.range:0} m   " +
-                               $"<color=#8A9099>POWER</color> {def.batteryPerShot:0.##}/shot";
+                               (def.batteryFraction > 0f ? $"<color=#8A9099>POWER</color> {def.batteryFraction * 100f:0}% battery/shot"
+                                                         : $"<color=#8A9099>POWER</color> {def.batteryPerShot:0.##}/shot") +
+                               (def.kind == WeaponKind.RocketStrike
+                                   ? $"\n<color=#8A9099>BLAST</color> {def.blastRadius:0} m   <color=#8A9099>SAFE DISTANCE</color> {def.safeDistance:0} m   <color=#8A9099>RELOAD</color> {def.reloadTime:0.#} s"
+                                   : "");
         }
 
         void SetStatus(string msg)
@@ -470,11 +474,13 @@ namespace Bobery.Rover
             RoverUI.TopLeft(icon, 14, 14, CardW - 28, 54);
             Color ic = mounted ? RoverUI.Green : RoverUI.Accent;
             bool heavy = def != null && def.damage >= 10f;
-            Silhouette(icon, ic, heavy);
+            if (def != null && def.kind == WeaponKind.RocketStrike) RocketSilhouette(icon, ic);
+            else Silhouette(icon, ic, heavy);
 
             var name = RoverUI.Label(card, def != null ? def.displayName : id, 15, FontStyle.Bold, RoverUI.White);
             RoverUI.TopLeft(name.rectTransform, 14, 76, CardW - 28, 20);
-            string stats = def != null ? $"{def.damage:0.#} DMG / {def.fireRate:0.#} PER S" : "";
+            string stats = def == null ? "" : def.kind == WeaponKind.RocketStrike
+                ? $"{def.damage:0} DMG / {def.blastRadius:0} M BLAST" : $"{def.damage:0.#} DMG / {def.fireRate:0.#} PER S";
             var st = RoverUI.Label(card, stats, 11, FontStyle.Normal, RoverUI.Dim, mono: true);
             RoverUI.TopLeft(st.rectTransform, 14, 98, CardW - 28, 16);
             var tag = RoverUI.Label(card, mounted ? "[MOUNTED]" : "[STORED]", 10, FontStyle.Bold, mounted ? RoverUI.Green : RoverUI.Dim, mono: true);
@@ -482,7 +488,26 @@ namespace Bobery.Rover
             return card;
         }
 
-        static void Silhouette(RectTransform icon, Color c, bool heavy)
+        public static void RocketSilhouette(RectTransform icon, Color c)
+        {
+            void Box(float x, float y, float w, float h)
+            {
+                var rt = RoverUI.Rect("Px", icon);
+                rt.anchorMin = rt.anchorMax = new Vector2(0, 0);
+                rt.pivot = Vector2.zero;
+                rt.anchoredPosition = new Vector2(x, y);
+                rt.sizeDelta = new Vector2(w, h);
+                RoverUI.Img(rt, c);
+            }
+            Box(30, 20, 90, 14);        // body
+            Box(120, 22, 10, 10);       // nose
+            Box(130, 25, 6, 4);
+            Box(30, 34, 18, 10);        // fins
+            Box(30, 10, 18, 10);
+            Box(18, 24, 12, 6);         // nozzle
+        }
+
+        public static void Silhouette(RectTransform icon, Color c, bool heavy)
         {
             void Box(float x, float y, float w, float h)
             {

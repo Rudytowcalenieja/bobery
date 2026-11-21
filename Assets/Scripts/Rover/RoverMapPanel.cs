@@ -606,6 +606,101 @@ namespace Bobery.Rover
             for (int i = shown; i < _enemyMarks.Count; i++) _enemyMarks[i].gameObject.SetActive(false);
         }
 
+        // ================================================================ outpost arrows
+
+        readonly List<(RectTransform rt, Image img, TextMeshProUGUI label)> _outpostArrows = new List<(RectTransform, Image, TextMeshProUGUI)>();
+        RectTransform _outpostRoot;
+        static Sprite _arrowSprite;
+
+        /// <summary>
+        /// Small yellow arrows for every outpost that isn't completed yet: hovering over it (pointing down) when
+        /// it's on the map, or pinned to the map's edge pointing toward it, with the distance, when it's off the map.
+        /// </summary>
+        void UpdateOutpostArrows()
+        {
+            if (!_map || !rover) return;
+            if (!_outpostRoot)
+            {
+                _outpostRoot = NewRect("OutpostArrows", _map);
+                Stretch(_outpostRoot, 0);
+            }
+            Rect r = _map.rect;
+            float hw = r.width * 0.5f, hh = r.height * 0.5f;
+            const float edge = 13f;
+            int used = 0;
+            foreach (var o in OutpostProgress.Unfinished)
+            {
+                if (!o) continue;
+                while (_outpostArrows.Count <= used)
+                {
+                    var rt = NewRect("OutpostArrow", _outpostRoot);
+                    rt.sizeDelta = new Vector2(14, 14);
+                    var img = Img(rt, RoverUI.Yellow);
+                    img.sprite = ArrowSprite();
+                    img.raycastTarget = false;
+                    var label = RoverUI.Label(_outpostRoot, "", 9, FontStyle.Bold, RoverUI.Yellow, mono: true);
+                    label.rectTransform.sizeDelta = new Vector2(60, 12);
+                    label.alignment = TextAlignmentOptions.Center;
+                    label.textWrappingMode = TextWrappingModes.NoWrap;
+                    _outpostArrows.Add((rt, img, label));
+                }
+                var (arrow, aimg, text) = _outpostArrows[used++];
+                arrow.gameObject.SetActive(true);
+
+                Vector2 p = WorldToMapUnclamped(o.Center);
+                bool inside = Mathf.Abs(p.x) < hw - edge && Mathf.Abs(p.y) < hh - edge;
+                float bob = Mathf.Sin(Time.unscaledTime * 4f + used) * 2.5f;
+                if (inside)
+                {
+                    // Hover above the outpost, pointing down at it.
+                    arrow.anchoredPosition = p + new Vector2(0f, 14f + bob);
+                    arrow.localRotation = Quaternion.Euler(0, 0, 180f);
+                    text.gameObject.SetActive(false);
+                }
+                else
+                {
+                    // Pinned to the edge, pointing toward it.
+                    Vector2 dir = p.sqrMagnitude > 0.01f ? p.normalized : Vector2.up;
+                    float k = Mathf.Min((hw - edge) / Mathf.Max(0.001f, Mathf.Abs(p.x)), (hh - edge) / Mathf.Max(0.001f, Mathf.Abs(p.y)));
+                    Vector2 at = p * Mathf.Min(1f, k);
+                    arrow.anchoredPosition = at + dir * bob;
+                    arrow.localRotation = Quaternion.Euler(0, 0, Mathf.Atan2(dir.y, dir.x) * Mathf.Rad2Deg - 90f);
+                    text.gameObject.SetActive(true);
+                    text.text = $"{Flat(rover.transform.position, o.Center):0}m";
+                    Vector2 inward = at - dir * 16f;
+                    text.rectTransform.anchoredPosition = inward;
+                }
+                float pulse = 0.75f + 0.25f * Mathf.Sin(Time.unscaledTime * 5f + used);
+                aimg.color = A(RoverUI.Yellow, pulse);
+            }
+            for (int i = used; i < _outpostArrows.Count; i++)
+            {
+                _outpostArrows[i].rt.gameObject.SetActive(false);
+                _outpostArrows[i].label.gameObject.SetActive(false);
+            }
+        }
+
+        /// <summary>Solid triangle pointing up (+Y).</summary>
+        static Sprite ArrowSprite()
+        {
+            if (_arrowSprite) return _arrowSprite;
+            const int n = 32;
+            var tex = new Texture2D(n, n, TextureFormat.RGBA32, false) { wrapMode = TextureWrapMode.Clamp };
+            var px = new Color32[n * n];
+            for (int y = 0; y < n; y++)
+                for (int x = 0; x < n; x++)
+                {
+                    float fy = (y + 0.5f) / n;               // 0 bottom .. 1 tip
+                    float half = (1f - fy) * 0.5f;            // half-width at this height
+                    float dx = Mathf.Abs((x + 0.5f) / n - 0.5f);
+                    float a = Mathf.Clamp01((half - dx) * n * 0.7f) * Mathf.Clamp01(fy * n * 0.7f) * Mathf.Clamp01((1f - fy) * n);
+                    px[y * n + x] = new Color32(255, 255, 255, (byte)(255 * a));
+                }
+            tex.SetPixels32(px);
+            tex.Apply();
+            return _arrowSprite = Sprite.Create(tex, new Rect(0, 0, n, n), new Vector2(0.5f, 0.5f));
+        }
+
         // ================================================================ battery
 
         /// <summary>Battery gauge, just above the fuel gauge.</summary>
@@ -1247,6 +1342,7 @@ namespace Bobery.Rover
             UpdateHull();
             UpdateBeacons();
             UpdateEnemies();
+            UpdateOutpostArrows();
             UpdateCast();
 
             // Slide-in on start.

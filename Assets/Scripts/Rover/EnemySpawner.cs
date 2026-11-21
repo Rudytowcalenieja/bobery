@@ -126,7 +126,7 @@ namespace Bobery.Rover
             float bestD = activationRange;
             foreach (var o in _outposts)
             {
-                if (!o) continue;
+                if (!o || OutpostProgress.IsCompleted(o)) continue; // neutralized: no more walkers
                 float d = Flat(o.Center, _rover.transform.position);
                 if (d > bestD) continue;
                 int count = 0;

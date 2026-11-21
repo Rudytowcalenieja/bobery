@@ -16,6 +16,7 @@ namespace Bobery.Rover.EditorTools
         {
             { WeaponDef.AutoCannonId, "Assets/Models/autoCannon.fbx" },
             { WeaponDef.RailGunId, "Assets/Models/railGun.fbx" },
+            { WeaponDef.RocketId, "Assets/Models/rocket.fbx" },
         };
 
         [MenuItem("Bobery/Rebuild Weapon Database")]

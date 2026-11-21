@@ -125,7 +125,123 @@ namespace Bobery.Rover
             LightFade.Spawn(pos + Vector3.up * s, new Color(1f, 0.6f, 0.25f), 14f, 18f * s, 0.6f);
         }
 
+        /// <summary>Outpost completed: a column of golden sparks shooting up from it, with a bright flash.</summary>
+        public static void RewardFlare(Vector3 pos)
+        {
+            var column = NewSystem("RewardColumn", pos, Quaternion.Euler(-90f, 0f, 0f), 3f);
+            Configure(column, life: new Vector2(1.2f, 2.2f), speed: new Vector2(18f, 40f), size: new Vector2(0.4f, 0.9f),
+                start: new Color(1f, 0.95f, 0.55f), end: new Color(1f, 0.75f, 0.2f, 0f), gravity: 0.15f, shrink: true);
+            Cone(column, 6f, 1.5f);
+            Stretch(column, 0.06f);
+            var main = column.main;
+            main.maxParticles = 128;
+            Burst(column, 70);
+
+            var glow = NewSystem("RewardGlow", pos + Vector3.up * 2f, Quaternion.identity, 2f);
+            Configure(glow, life: new Vector2(0.8f, 1.4f), speed: new Vector2(2f, 6f), size: new Vector2(4f, 8f),
+                start: new Color(1f, 0.9f, 0.5f, 0.6f), end: new Color(1f, 0.8f, 0.3f, 0f), gravity: -0.1f, shrink: false);
+            Sphere(glow, 2f);
+            Burst(glow, 14);
+
+            LightFade.Spawn(pos + Vector3.up * 6f, new Color(1f, 0.85f, 0.4f), 16f, 60f, 1.6f);
+        }
+
+        /// <summary>Ring of dust rolling out along the ground from a big blast.</summary>
+        public static void Shockwave(Vector3 pos, float radius)
+        {
+            var ps = NewSystem("Shockwave", pos + Vector3.up * 0.5f, Quaternion.Euler(-90f, 0f, 0f), 2.5f);
+            Configure(ps, life: new Vector2(0.8f, 1.4f), speed: new Vector2(radius * 1.1f, radius * 1.6f), size: new Vector2(radius * 0.25f, radius * 0.45f),
+                start: new Color(0.55f, 0.46f, 0.35f, 0.7f), end: new Color(0.5f, 0.43f, 0.34f, 0f), gravity: 0f, shrink: false);
+            var shape = ps.shape;
+            shape.enabled = true;
+            shape.shapeType = ParticleSystemShapeType.Circle;
+            shape.radius = radius * 0.15f;
+            shape.radiusThickness = 0f;
+            var main = ps.main;
+            main.maxParticles = 128;
+            Burst(ps, 48);
+        }
+
+        /// <summary>Looping smoke trail behind a rocket (world-space, so it stays in the air). Toggle with emission.</summary>
+        public static ParticleSystem ExhaustSmoke(Transform parent, Vector3 localPos, float scale)
+        {
+            var ps = NewLoop("ExhaustSmoke", parent, localPos, ParticleSystemSimulationSpace.World);
+            Configure(ps, life: new Vector2(0.8f, 1.6f), speed: new Vector2(0.5f, 2f) * scale, size: new Vector2(0.8f, 1.5f) * scale,
+                start: new Color(0.85f, 0.8f, 0.75f, 0.55f), end: new Color(0.6f, 0.6f, 0.6f, 0f), gravity: -0.03f, shrink: false);
+            var em = ps.emission;
+            em.rateOverTime = 0f;
+            em.rateOverDistance = 1.2f / Mathf.Max(0.1f, scale);
+            var main = ps.main;
+            main.maxParticles = 400;
+            Cone(ps, 8f, 0.1f * scale);
+            ps.Play();
+            return ps;
+        }
+
+        /// <summary>Bright flame at a rocket's tail (moves with it).</summary>
+        public static ParticleSystem ExhaustFlame(Transform parent, Vector3 localPos, float scale)
+        {
+            var ps = NewLoop("ExhaustFlame", parent, localPos, ParticleSystemSimulationSpace.Local);
+            Configure(ps, life: new Vector2(0.08f, 0.16f), speed: new Vector2(8f, 14f) * scale, size: new Vector2(0.6f, 1.1f) * scale,
+                start: new Color(1f, 0.95f, 0.7f), end: new Color(1f, 0.35f, 0.05f, 0f), gravity: 0f, shrink: true);
+            var em = ps.emission;
+            em.rateOverTime = 70f;
+            Cone(ps, 6f, 0.1f * scale);
+            ps.Play();
+            return ps;
+        }
+
+        /// <summary>A flat circle line (target markers). Position it with <see cref="PlaceRing"/>.</summary>
+        public static LineRenderer NewRing(string name, Transform parent)
+        {
+            var go = new GameObject(name) { layer = HiddenLayer };
+            if (parent) go.transform.SetParent(parent, false);
+            var lr = go.AddComponent<LineRenderer>();
+            lr.useWorldSpace = true;
+            lr.loop = true;
+            lr.positionCount = RingSegments;
+            lr.sharedMaterial = LineMaterial();
+            lr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            lr.receiveShadows = false;
+            lr.numCornerVertices = 2;
+            return lr;
+        }
+
+        const int RingSegments = 48;
+        static readonly RaycastHit[] _ringHits = new RaycastHit[8];
+
+        /// <summary>Lays the ring on the ground around <paramref name="center"/> (each point dropped onto the terrain).</summary>
+        public static void PlaceRing(LineRenderer ring, Vector3 center, float radius, Color color, float width)
+        {
+            ring.startColor = ring.endColor = color;
+            ring.widthMultiplier = width;
+            int mask = ~(1 << HiddenLayer) & ~(1 << 2) & ~(1 << 5);
+            for (int i = 0; i < RingSegments; i++)
+            {
+                float a = i * Mathf.PI * 2f / RingSegments;
+                Vector3 p = center + new Vector3(Mathf.Cos(a), 0f, Mathf.Sin(a)) * radius;
+                float y = center.y;
+                int n = Physics.RaycastNonAlloc(p + Vector3.up * 60f, Vector3.down, _ringHits, 120f, mask, QueryTriggerInteraction.Ignore);
+                float best = float.MaxValue;
+                for (int h = 0; h < n; h++)
+                {
+                    if (_ringHits[h].collider.attachedRigidbody) continue; // skip the rover
+                    if (_ringHits[h].distance < best) { best = _ringHits[h].distance; y = _ringHits[h].point.y; }
+                }
+                p.y = y + 0.35f;
+                ring.SetPosition(i, p);
+            }
+        }
+
         // ================================================================ materials
+
+        static Material _lineMat;
+        public static Material LineMaterial()
+        {
+            if (_lineMat) return _lineMat;
+            _lineMat = new Material(Shader.Find("Sprites/Default")) { name = "WeaponLine" };
+            return _lineMat;
+        }
 
         /// <summary>Soft round sprite, alpha blended (Sprites/Default ships with every build).</summary>
         public static Material ParticleMaterial()
@@ -183,6 +299,30 @@ namespace Bobery.Rover
             main.maxParticles = 64;
             var em = ps.emission;
             em.rateOverTime = 0f;
+            var shape = ps.shape;
+            shape.enabled = false;
+            var r = go.GetComponent<ParticleSystemRenderer>();
+            r.sharedMaterial = ParticleMaterial();
+            r.renderMode = ParticleSystemRenderMode.Billboard;
+            r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            r.receiveShadows = false;
+            return ps;
+        }
+
+        static ParticleSystem NewLoop(string name, Transform parent, Vector3 localPos, ParticleSystemSimulationSpace space)
+        {
+            var go = new GameObject(name) { layer = HiddenLayer };
+            go.transform.SetParent(parent, false);
+            go.transform.localPosition = localPos;
+            go.transform.localRotation = Quaternion.LookRotation(Vector3.back); // emit out of the tail
+            var ps = go.AddComponent<ParticleSystem>();
+            ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+            var main = ps.main;
+            main.duration = 1f;
+            main.loop = true;
+            main.playOnAwake = false;
+            main.simulationSpace = space;
+            main.maxParticles = 200;
             var shape = ps.shape;
             shape.enabled = false;
             var r = go.GetComponent<ParticleSystemRenderer>();

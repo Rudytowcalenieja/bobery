@@ -13,8 +13,13 @@ MonoBehaviour:
   m_Name: WeaponDatabase
   m_EditorClassIdentifier: Assembly-CSharp::Bobery.Rover.WeaponDatabase
   startingWeapon: autoCannon
+  outpostRewards:
+  - railGun
+  - 
+  - rocket
   weapons:
-  - id: autoCannon
+  - kind: 0
+    id: autoCannon
     displayName: AUTOCANNON
     description: Rapid-fire 20 mm cannon. 5 shots per second, light damage. Good against walkers.
     unlockedAtStart: 1
@@ -40,14 +45,21 @@ MonoBehaviour:
     spread: 0.9
     projectileSpeed: 150
     batteryPerShot: 0.2
+    batteryFraction: 0
     turnSpeed: 70
     tracerColor: {r: 1, g: 0.72, b: 0.28, a: 1}
     fxScale: 1.4
     recoilKick: 0.12
-  - id: railGun
+    blastRadius: 14
+    safeDistance: 30
+    selfDamageMax: 0.6
+    reloadTime: 4
+    flightHeight: 220
+  - kind: 0
+    id: railGun
     displayName: RAILGUN
     description: Magnetic slug thrower. One slow, heavy shot that punches through turret armour.
-    unlockedAtStart: 1
+    unlockedAtStart: 0
     model: {fileID: 919132149155446097, guid: 428281b2a9eb70a4daffb540314c0800, type: 3}
     fireClips:
     - {fileID: 8971653179785726973, guid: 428281b2a9eb70a4daffb540314c0800, type: 3}
@@ -71,7 +83,41 @@ MonoBehaviour:
     spread: 0
     projectileSpeed: 400
     batteryPerShot: 3
+    batteryFraction: 0
     turnSpeed: 40
     tracerColor: {r: 0.45, g: 0.85, b: 1, a: 1}
     fxScale: 2.2
     recoilKick: 0.6
+    blastRadius: 14
+    safeDistance: 30
+    selfDamageMax: 0.6
+    reloadTime: 4
+    flightHeight: 220
+  - kind: 1
+    id: rocket
+    displayName: ROCKET
+    description: 'Hangs under the rover. Click a spot: the rocket drops, climbs out of sight and falls on it. Keep the rover out of the blast.'
+    unlockedAtStart: 0
+    model: {fileID: 919132149155446097, guid: edd04c89aae92784b930f1ad534198aa, type: 3}
+    fireClips: []
+    clipSpeed: 1
+    modelEuler: {x: 90, y: 0, z: 0}
+    pivot: {x: 0, y: 14.55, z: 0}
+    muzzle: {x: 0, y: 0, z: 0}
+    sizeVsRover: 0.38
+    fireRate: 0.25
+    damage: 80
+    range: 160
+    spread: 0
+    projectileSpeed: 150
+    batteryPerShot: 0.2
+    batteryFraction: 0.2
+    turnSpeed: 0
+    tracerColor: {r: 1, g: 0.55, b: 0.2, a: 1}
+    fxScale: 2.5
+    recoilKick: 0
+    blastRadius: 14
+    safeDistance: 30
+    selfDamageMax: 0.6
+    reloadTime: 4
+    flightHeight: 220

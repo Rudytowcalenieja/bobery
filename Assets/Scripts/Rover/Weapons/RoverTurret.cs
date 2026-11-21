@@ -24,6 +24,10 @@ namespace Bobery.Rover
         public float skyAimDistance = 120f;
         [Tooltip("Health bars are drawn for targets closer than this.")]
         public float healthBarRange = 160f;
+        [Tooltip("Rocket rack height, as a share of the turret slot's height above the rover's feet (the belly).")]
+        [Range(0.1f, 1f)] public float bellyHeight = 0.6f;
+        [Tooltip("Seconds the loading animation takes (a fresh rocket lowered out of the belly).")]
+        public float rocketLoadTime = 1f;
 
         public WeaponDef Weapon => _def;
         public bool IsFiring { get; private set; }
@@ -58,6 +62,7 @@ namespace Bobery.Rover
             WeaponLoadout.Changed -= OnLoadoutChanged;
             CombatHealth.AnyDied -= OnAnyDied;
             if (_canvas) Destroy(_canvas.gameObject);
+            if (_targetRing) Destroy(_targetRing.gameObject);
             Cursor.visible = true;
         }
 
@@ -89,9 +94,11 @@ namespace Bobery.Rover
             if (_pivot) Destroy(_pivot.gameObject);
             _pivot = null; _gun = null; _muzzle = null; _model = null;
             _clips.Clear();
+            _rocket = null;
             if (def == null) return;
 
             if (!_slot) _slot = FindSlot();
+            if (def.kind == WeaponKind.RocketStrike) { BuildRocketRack(def); return; }
             _pivot = new GameObject(GunRootName).transform;
             _pivot.SetParent(_slot, false);
 
@@ -172,6 +179,150 @@ namespace Bobery.Rover
             go.GetComponent<Renderer>().sharedMaterial = m;
         }
 
+        // ================================================================ rocket rack
+
+        Transform _rocket;          // the loaded (or loading) rocket under the belly, +Z = nose
+        float _rocketLength, _reload, _loadT;
+        bool _targetValid;
+        Vector3 _lastPos, _roverVel;
+        LineRenderer _targetRing;
+
+        public bool RocketLoaded => _rocket && _loadT >= 1f;
+        public float RocketLoadProgress => _rocket ? _loadT * 0.3f + 0.7f
+            : _def != null ? 0.7f * Mathf.Clamp01(1f - _reload / Mathf.Max(0.01f, _def.reloadTime - rocketLoadTime)) : 0f;
+
+        /// <summary>Rocket rack under the rover's belly (the turret slot stays empty).</summary>
+        void BuildRocketRack(WeaponDef def)
+        {
+            _pivot = new GameObject(GunRootName).transform;
+            _pivot.SetParent(transform, false);
+            float slotH = transform.InverseTransformPoint(_slot.position).y;
+            _pivot.localPosition = new Vector3(0f, slotH * bellyHeight, 0f);
+            _pivot.localRotation = Quaternion.identity;
+            float roverLength = _fit && _fit.IsFitted ? _fit.WorldSize.z : 10f;
+            _rocketLength = roverLength * def.sizeVsRover;
+
+            // Two clamps the rocket hangs from.
+            float ps = Mathf.Max(0.0001f, _pivot.lossyScale.x);
+            var dark = WeaponFx.Unlit(new Color(0.16f, 0.17f, 0.18f));
+            foreach (float z in new[] { -0.28f, 0.22f })
+                Prim(PrimitiveType.Cube, _pivot, new Vector3(0f, _rocketLength * 0.09f / ps, _rocketLength * z / ps),
+                    new Vector3(_rocketLength * 0.16f, _rocketLength * 0.06f, _rocketLength * 0.05f) / ps, Vector3.zero, dark);
+
+            _rocket = MakeRocket(def);
+            _loadT = 1f;
+            _reload = 0f;
+            PlaceRocket();
+        }
+
+        Transform MakeRocket(WeaponDef def)
+        {
+            var holder = new GameObject("Rocket").transform;
+            holder.SetParent(_pivot, false);
+            GameObject model;
+            Vector3 euler = def.modelEuler, pivot = def.pivot;
+            if (def.model) model = Instantiate(def.model);
+            else
+            {
+                model = new GameObject("RocketPlaceholder");
+                Prim(PrimitiveType.Cylinder, model.transform, Vector3.zero, new Vector3(0.25f, 1f, 0.25f), Vector3.zero, WeaponFx.Unlit(new Color(0.8f, 0.8f, 0.78f)));
+                Prim(PrimitiveType.Sphere, model.transform, new Vector3(0f, 1f, 0f), Vector3.one * 0.25f, Vector3.zero, WeaponFx.Unlit(new Color(0.8f, 0.2f, 0.1f)));
+                euler = new Vector3(90f, 0f, 0f); pivot = Vector3.zero;
+            }
+            foreach (var c in model.GetComponentsInChildren<Collider>(true)) Destroy(c);
+            foreach (var a in model.GetComponentsInChildren<Animator>(true)) Destroy(a);
+            model.transform.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
+            model.transform.localScale = Vector3.one;
+            Bounds b = default;
+            bool any = false;
+            foreach (var r in model.GetComponentsInChildren<Renderer>(true)) { if (!any) { b = r.bounds; any = true; } else b.Encapsulate(r.bounds); }
+            float length = any ? Mathf.Max(0.01f, Mathf.Max(b.size.x, b.size.y, b.size.z)) : 1f;
+            float s = _rocketLength / length / Mathf.Max(0.0001f, _pivot.lossyScale.x);
+            var rot = Quaternion.Euler(euler);
+            model.transform.SetParent(holder, false);
+            model.transform.localRotation = rot;
+            model.transform.localScale = Vector3.one * s;
+            model.transform.localPosition = -(rot * pivot) * s;
+            return holder;
+        }
+
+        /// <summary>Loading: the rocket is lowered out of the belly, then hangs with a slight sway.</summary>
+        void PlaceRocket()
+        {
+            if (!_rocket) return;
+            float ps = Mathf.Max(0.0001f, _pivot.lossyScale.x);
+            float e = 1f - Mathf.Pow(1f - Mathf.Clamp01(_loadT), 3f);
+            float hidden = _rocketLength * 0.25f / ps;
+            float sway = _loadT >= 1f ? Mathf.Sin(Time.time * 1.7f) * 1.2f : (1f - e) * 6f;
+            _rocket.localPosition = new Vector3(0f, hidden * (1f - e), 0f);
+            _rocket.localRotation = Quaternion.Euler(sway * 0.4f, 180f, sway); // nose to the rear: it leaves out the back
+        }
+
+        void UpdateRocket(Camera cam, Vector2 sp, bool inView, Mouse mouse)
+        {
+            float dt = Time.deltaTime;
+            if (dt > 0f) _roverVel = (transform.position - _lastPos) / dt;
+            _lastPos = transform.position;
+
+            // Reload, then lower the new rocket out of the belly.
+            if (!_rocket)
+            {
+                _reload -= dt;
+                if (_reload <= 0f) { _rocket = MakeRocket(_def); _loadT = 0f; }
+            }
+            if (_rocket && _loadT < 1f)
+            {
+                _loadT = Mathf.Min(1f, _loadT + dt / Mathf.Max(0.05f, rocketLoadTime));
+                if (_loadT >= 1f) RoverHud.Notify("Rocket loaded");
+            }
+            PlaceRocket();
+
+            // Target: the ground (or enemy) under the mouse.
+            _targetValid = false;
+            _aimOnEnemy = false;
+            if (inView)
+            {
+                Ray ray = cam.ScreenPointToRay(sp);
+                if (RaycastWorld(ray, 1000f, out float d, out CombatHealth h))
+                {
+                    _aimPoint = h ? h.transform.position : ray.GetPoint(d);
+                    _aimOnEnemy = h;
+                    _targetValid = FlatDistance(transform.position, _aimPoint) <= _def.range;
+                }
+            }
+
+            if (inView && _targetValid && mouse.leftButton.wasPressedThisFrame)
+            {
+                float cost = _battery ? _def.ShotCost(_battery.capacity) : 0f;
+                if (!RocketLoaded) _noPowerFlash = 0.5f;
+                else if (_battery && !_battery.TryUse(cost)) _noPowerFlash = 1f;
+                else
+                {
+                    RocketStrike.Launch(_rocket, _rocketLength, _aimPoint, _def, GetComponent<RoverController>(), _roverVel, RocketClearDistance());
+                    _rocket = null;
+                    _reload = Mathf.Max(0f, _def.reloadTime - rocketLoadTime);
+                    _shotPulse = 1f;
+                }
+            }
+        }
+
+        /// <summary>How far back from the rack a launched rocket flies before it turns up (past the rover's tail).</summary>
+        public float RocketClearDistance()
+        {
+            float roverLength = _fit && _fit.IsFitted ? _fit.WorldSize.z : 10f;
+            float rackZ = _pivot ? transform.InverseTransformPoint(_pivot.position).z * transform.lossyScale.z : 0f;
+            return roverLength * 0.5f + rackZ + _rocketLength * 0.6f + 1.5f;
+        }
+
+        public static float FlatDistance(Vector3 a, Vector3 b) { a.y = 0f; b.y = 0f; return Vector3.Distance(a, b); }
+
+        /// <summary>Share of the rover's hull a rocket blast takes at distance <paramref name="d"/> (0 beyond the safe distance).</summary>
+        public static float SelfDamageShare(WeaponDef def, float d)
+        {
+            if (def == null || def.safeDistance <= 0f || d >= def.safeDistance) return 0f;
+            return def.selfDamageMax * (1f - d / def.safeDistance);
+        }
+
         void SampleClips(float time)
         {
             if (!_model) return;
@@ -192,7 +343,9 @@ namespace Bobery.Rover
             Vector2 sp = mouse != null ? mouse.position.ReadValue() : Vector2.zero;
             bool inView = !blocked && cam && mouse != null && cam.pixelRect.Contains(sp);
 
-            if (_def != null && _pivot && inView) Aim(cam, sp);
+            bool rocket = _def != null && _def.kind == WeaponKind.RocketStrike;
+            if (rocket) UpdateRocket(cam, sp, inView, mouse);
+            else if (_def != null && _pivot && inView) Aim(cam, sp);
 
             // Fire while held.
             IsFiring = false;
@@ -206,7 +359,7 @@ namespace Bobery.Rover
                 {
                     _cooldown += _def.FireInterval;
                     if (_cooldown < 0f) _cooldown = 0f;
-                    if (!_battery || _battery.TryUse(_def.batteryPerShot)) Shoot();
+                    if (!_battery || _battery.TryUse(_def.ShotCost(_battery.capacity))) Shoot();
                     else _noPowerFlash = 1f;
                 }
             }
@@ -387,8 +540,10 @@ namespace Bobery.Rover
                 foreach (var p in _crossParts) p.color = c;
 
                 _label.rectTransform.anchoredPosition = sp / k + new Vector2(18, -14);
+                _label.rectTransform.sizeDelta = new Vector2(220, 18);
                 if (_def == null) { _label.text = "NO WEAPON - mount one in the cockpit"; _label.color = RoverUI.Yellow; }
-                else if (_battery && _battery.Charge + 0.0001f < _def.batteryPerShot) { _label.text = "NO POWER"; _label.color = RoverUI.Red; }
+                else if (_def.kind == WeaponKind.RocketStrike) RocketLabel();
+                else if (_battery && _battery.Charge + 0.0001f < _def.ShotCost(_battery.capacity)) { _label.text = "NO POWER"; _label.color = RoverUI.Red; }
                 else
                 {
                     _label.text = _def.displayName + (IsFiring ? "  FIRING" : "  [LMB]");
@@ -426,7 +581,32 @@ namespace Bobery.Rover
                 foreach (var p in _hitParts) p.color = kill ? RoverUI.Red : RoverUI.White;
             }
 
+            UpdateTargetRing(inView);
             UpdateHealthBars(cam, k);
+        }
+
+        void RocketLabel()
+        {
+            float cost = _battery ? _def.ShotCost(_battery.capacity) : 0f;
+            float share = SelfDamageShare(_def, FlatDistance(transform.position, _aimPoint));
+            _label.rectTransform.sizeDelta = new Vector2(340, 34);
+            if (!RocketLoaded) { _label.text = $"ROCKET  LOADING {RocketLoadProgress * 100f:0}%"; _label.color = RoverUI.Yellow; }
+            else if (_battery && _battery.Charge + 0.0001f < cost) { _label.text = $"ROCKET  NEEDS {_def.batteryFraction * 100f:0}% BATTERY"; _label.color = RoverUI.Red; }
+            else if (!_targetValid) { _label.text = "ROCKET  OUT OF RANGE"; _label.color = RoverUI.Dim; }
+            else if (share > 0f) { _label.text = $"ROCKET  [LMB] LAUNCH\nTOO CLOSE: blast hits rover (-{share * 100f:0}% hull)"; _label.color = RoverUI.Red; }
+            else { _label.text = $"ROCKET  [LMB] LAUNCH  (-{_def.batteryFraction * 100f:0}% battery)"; _label.color = _noPowerFlash > 0f ? RoverUI.Red : RoverUI.Accent; }
+        }
+
+        /// <summary>Blast circle on the ground under the mouse while the rocket is mounted.</summary>
+        void UpdateTargetRing(bool inView)
+        {
+            bool show = inView && _def != null && _def.kind == WeaponKind.RocketStrike && _targetValid;
+            if (!_targetRing) _targetRing = WeaponFx.NewRing("RocketAim", null);
+            _targetRing.enabled = show;
+            if (!show) return;
+            bool danger = SelfDamageShare(_def, FlatDistance(transform.position, _aimPoint)) > 0f;
+            Color c = danger ? RoverUI.Red : RocketLoaded ? RoverUI.Accent : RoverUI.Yellow;
+            WeaponFx.PlaceRing(_targetRing, _aimPoint, _def.blastRadius, RoverUI.A(c, 0.9f), 0.3f);
         }
 
         void UpdateHealthBars(Camera cam, float k)
