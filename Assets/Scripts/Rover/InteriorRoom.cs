@@ -86,6 +86,14 @@ namespace Bobery.Rover
         RectTransform _batTrack, _batFill;
         TextMeshProUGUI _batText, _powerText;
 
+        // Tutorial arrow targets.
+        public Camera Cam => _cam;
+        public InteriorRepairs Repairs => _repairs;
+        public CockpitWeapons Weapons => _weapons;
+        public FuelStation Fuel => _fuel;
+        public CabinStation PilotSeat => _steer;
+        public RectTransform SidePanel { get; private set; }
+
         void Start()
         {
             var rover = FindAnyObjectByType<RoverController>();
@@ -183,6 +191,7 @@ namespace Bobery.Rover
 
             // Left column (same width/style as the navigation panel)
             var side = RoverUI.Rect("Side", root);
+            SidePanel = side;
             side.anchorMin = new Vector2(0, 0); side.anchorMax = new Vector2(0, 1);
             side.pivot = new Vector2(0, 0.5f); side.sizeDelta = new Vector2(400, 0);
             RoverUI.Img(side, RoverUI.Black);
@@ -277,7 +286,7 @@ namespace Bobery.Rover
         void Update()
         {
             var kb = Keyboard.current;
-            if (kb != null && !GameOverScreen.IsShown)
+            if (kb != null && !GameOverScreen.IsShown && !TutorialTips.IsOpen)
             {
                 if (kb.escapeKey.wasPressedThisFrame)
                 {

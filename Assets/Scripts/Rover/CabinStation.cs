@@ -22,6 +22,8 @@ namespace Bobery.Rover
         InteriorRepairs _repairs;
         Camera _cam;
         Transform _target;
+        /// <summary>The station's object (seat, rack...).</summary>
+        public Transform Target => _target;
         Vector3 _stand, _markerAt;
         Func<string> _button;
         Func<(string text, Color color)> _state;
@@ -91,7 +93,7 @@ namespace Bobery.Rover
             }
             PointerOverUi = _buttons.Update();
             var kb = Keyboard.current;
-            if (kb != null && kb.eKey.wasPressedThisFrame) _use?.Invoke();
+            if (kb != null && kb.eKey.wasPressedThisFrame && !TutorialTips.IsOpen) _use?.Invoke();
         }
 
         /// <summary>Clicking the station's object walks the crew to it (after the cabin's own click handling).</summary>
@@ -99,7 +101,7 @@ namespace Bobery.Rover
         {
             var crew = _repairs ? _repairs.Crew : null;
             var mouse = Mouse.current;
-            if (!crew || !_cam || !_target || mouse == null || PointerOverUi || GameOverScreen.IsShown) return;
+            if (!crew || !_cam || !_target || mouse == null || PointerOverUi || GameOverScreen.IsShown || TutorialTips.IsOpen) return;
             if (Blocked != null && Blocked()) return;
             if (!mouse.leftButton.wasPressedThisFrame) return;
             Vector2 sp = mouse.position.ReadValue();

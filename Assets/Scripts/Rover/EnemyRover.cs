@@ -302,6 +302,7 @@ namespace Bobery.Rover
         /// <summary>Land inside the map that isn't water or an outpost building.</summary>
         public static bool Walkable(Bobery.Terrain.TerrainGenerator terrain, Vector3 world)
         {
+            if (BossArena.Active && !BossArena.Contains(world, 1f)) return false; // walled in with the boss
             if (!terrain) return true;
             var t = terrain.transform;
             Vector3 l = t.InverseTransformPoint(world);

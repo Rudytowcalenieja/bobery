@@ -68,6 +68,8 @@ namespace Bobery.Rover
         public float TopSpeed => maxForwardSpeed * speedMultiplier;
         /// <summary>Extra speed factor on top of the cruise speed (set by <see cref="RoverEngine"/> while boosting).</summary>
         public float SpeedBoost { get; set; } = 1f;
+        /// <summary>Extra world-space velocity on top of the driving (the boss-fight dodge dash). Burns no fuel.</summary>
+        public Vector3 ExtraVelocity { get; set; }
         public float TopTurnRate => turnSpeed * Mathf.Sqrt(speedMultiplier);
         /// <summary>Current yaw rate in degrees/second (positive = turning right).</summary>
         public float CurrentTurn => _currentTurn;
@@ -115,6 +117,7 @@ namespace Bobery.Rover
         /// <summary>Plans a route and starts driving. Returns false when there's no way to get there.</summary>
         public bool SetDestination(Vector3 worldPoint)
         {
+            if (BossArena.Active) worldPoint = BossArena.Clamp(worldPoint, ArenaMargin());
             ConfigurePathfinder();
             var tmp = new List<Vector3>();
             if (!_pathfinder.FindPath(transform.position, worldPoint, tmp) || tmp.Count == 0) return false;
@@ -179,6 +182,13 @@ namespace Bobery.Rover
             return 3f;
         }
 
+        /// <summary>How far the rover's centre stays from the boss arena wall and the boss.</summary>
+        float ArenaMargin()
+        {
+            var fit = _fit ? _fit : GetComponent<RoverAutoFit>();
+            return fit && fit.IsFitted ? Mathf.Max(fit.WorldSize.x, fit.WorldSize.z) * 0.5f : 3f;
+        }
+
         void Awake()
         {
             _rb = GetComponent<Rigidbody>();
@@ -223,6 +233,9 @@ namespace Bobery.Rover
 
             // Footsteps in time with the walk animation, gun loops.
             if (!GetComponent<RoverAudio>()) gameObject.AddComponent<RoverAudio>();
+
+            // The final boss (arrives after the last outpost).
+            if (!GetComponent<BossFight>()) gameObject.AddComponent<BossFight>();
         }
 
         void Update()
@@ -292,6 +305,9 @@ namespace Bobery.Rover
             if (_tank && step > 0f) step *= _tank.Burn(step);
             if (_tank && _tank.IsEmpty) _currentSpeed = 0f;
             Vector3 pos = _rb.position + fwd * step;
+            Vector3 extra = ExtraVelocity; extra.y = 0f;
+            pos += extra * dt;
+            if (BossArena.Active) pos = BossArena.Clamp(pos, ArenaMargin()); // walled in with the boss
 
             // Four foot points around the body + the centre.
             Vector3 size = _fit && _fit.IsFitted ? _fit.WorldSize : new Vector3(3f, 2f, 4f);

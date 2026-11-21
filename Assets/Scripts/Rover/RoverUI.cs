@@ -306,6 +306,9 @@ namespace Bobery.Rover
 
         readonly List<Button> _buttons = new List<Button>();
 
+        /// <summary>These buttons keep working while a tutorial tip is open (the tip's own buttons).</summary>
+        public bool ignoreTutorial;
+
         public Button Add(RectTransform parent, string text, float x, float y, float w, float h, bool filled, Action onClick, int fontSize = 13)
         {
             var rt = RoverUI.Rect("Btn_" + text, parent);
@@ -353,6 +356,11 @@ namespace Bobery.Rover
         {
             var mouse = Mouse.current;
             if (mouse == null) return false;
+            if (TutorialTips.IsOpen && !ignoreTutorial)
+            {
+                foreach (var b in _buttons) if (b.rt && b.rt.gameObject.activeInHierarchy) Paint(b, false);
+                return false;
+            }
             Vector2 screen = mouse.position.ReadValue();
             bool click = mouse.leftButton.wasPressedThisFrame;
             bool over = false;

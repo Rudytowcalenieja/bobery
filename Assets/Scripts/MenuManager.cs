@@ -1,3 +1,4 @@
+using Bobery.Rover;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
@@ -13,12 +14,17 @@ public class MenuManager : MonoBehaviour
         cameraBase.GetChild(0).Translate((Mouse.current.position.ReadValue() / new Vector2(Screen.width, Screen.height) - new Vector2(0.5f, 0)) * 0.5f) ;
     }
 
-    public void LoadGame() 
+    /// <summary>START: ask whether the player wants the tutorial, then load the game.</summary>
+    public void LoadGame()
     {
-        SceneManager.LoadSceneAsync("Sebastian");
+        TutorialPrompt.Show(tutorial =>
+        {
+            TutorialTips.Enabled = tutorial;
+            SceneManager.LoadSceneAsync("Sebastian");
+        });
     }
 
-    public void QuitGame() 
+    public void QuitGame()
     {
         Application.Quit();
     }

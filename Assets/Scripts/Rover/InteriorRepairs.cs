@@ -315,6 +315,7 @@ namespace Bobery.Rover
         }
 
         public int LeakCount => _spots.Count;
+        public IEnumerable<LeakSpot> Spots => _spots.Values;
         /// <summary>The crew member walking around the cabin.</summary>
         public RepairCrew Crew => _crew;
 
@@ -324,7 +325,7 @@ namespace Bobery.Rover
         {
             Hovered = null;
             foreach (var s in _spots.Values) if (s) s.Highlight = false;
-            if (!_cam || GameOverScreen.IsShown) return;
+            if (!_cam || GameOverScreen.IsShown || TutorialTips.IsOpen) return;
             var mouse = Mouse.current;
             if (mouse == null) return;
             Vector2 sp = mouse.position.ReadValue();

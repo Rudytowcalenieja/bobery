@@ -24,6 +24,15 @@ namespace Bobery.Rover
         public float radius = 1.5f;
         [Tooltip("Health bar height above the object's position (metres).")]
         public float barHeight = 3f;
+        [Tooltip("Takes no damage; hits still register (boss armour).")]
+        public bool invulnerable;
+        [Tooltip("If set, only this weapon id does damage; every other hit is deflected (boss weak point).")]
+        public string onlyWeapon;
+
+        /// <summary>A hit that did no damage (<see cref="invulnerable"/>, or not the <see cref="onlyWeapon"/>).</summary>
+        public event Action<CombatHealth> Deflected;
+        /// <summary>No health bar for armour and weak points.</summary>
+        public bool ShowsHealthBar => !invulnerable && string.IsNullOrEmpty(onlyWeapon);
 
         public float Health { get; private set; }
         public float Fraction => maxHealth > 0f ? Mathf.Clamp01(Health / maxHealth) : 0f;
@@ -48,9 +57,18 @@ namespace Bobery.Rover
         void OnEnable() => All.Add(this);
         void OnDisable() => All.Remove(this);
 
-        public void TakeDamage(float amount, Vector3 at)
+        public void TakeDamage(float amount, Vector3 at) => TakeDamage(amount, at, null);
+
+        /// <summary>Damage from <paramref name="weapon"/> (null = not a gun shot, e.g. a rocket blast).</summary>
+        public void TakeDamage(float amount, Vector3 at, WeaponDef weapon)
         {
             if (IsDead || amount <= 0f) return;
+            if (invulnerable || (!string.IsNullOrEmpty(onlyWeapon) && (weapon == null || weapon.id != onlyWeapon)))
+            {
+                LastHitTime = Time.time;
+                Deflected?.Invoke(this);
+                return;
+            }
             Health = Mathf.Max(0f, Health - amount);
             LastHitTime = Time.time;
             if (Health <= 0f) Die();

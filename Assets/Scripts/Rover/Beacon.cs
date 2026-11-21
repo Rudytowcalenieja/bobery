@@ -492,6 +492,8 @@ namespace Bobery.Rover
             if (_timer) _timer.gameObject.SetActive(false);
             if (_hp) _hp.gameObject.SetActive(false);
             Vector3 at = _body.position;
+            // Cubes thrown off by earlier hits destroy themselves after a moment; drop the ones already gone.
+            _debris.RemoveAll(d => !d.t);
             // The beacon itself becomes debris.
             foreach (Transform part in _body.GetComponentsInChildren<Transform>())
             {
