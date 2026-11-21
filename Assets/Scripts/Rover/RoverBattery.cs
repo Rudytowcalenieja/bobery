@@ -16,8 +16,8 @@ namespace Bobery.Rover
         [Min(1f)] public float capacity = 100f;
         [Tooltip("Charge when the game starts (%).")]
         [Min(0f)] public float startingCharge = 100f;
-        [Tooltip("Seconds of map time on a full battery (180 = 3 min).")]
-        [Min(0f)] public float mapSecondsPerCharge = 180f;
+        [Tooltip("Seconds of map time on a full battery (300 = 5 min).")]
+        [Min(0f)] public float mapSecondsPerCharge = 300f;
         /// <summary>Charge used per second while the map is running.</summary>
         public float mapDrainPerSecond => mapSecondsPerCharge > 0f ? capacity / mapSecondsPerCharge : 0f;
         [Tooltip("Default charge used by one shot (see TryFire).")]
@@ -30,8 +30,8 @@ namespace Bobery.Rover
         public float Fraction => capacity > 0f ? Charge / capacity : 0f;
         public bool IsEmpty => Charge <= 0.0001f;
         public bool IsLow => Fraction <= lowFraction;
-        /// <summary>Firing needs power, and the charging switch off.</summary>
-        public bool CanFire => !IsEmpty && !ChargingEnabled;
+        /// <summary>Firing needs power.</summary>
+        public bool CanFire => !IsEmpty;
         /// <summary>True while a beacon is charging the battery this frame.</summary>
         public bool IsCharging => Time.frameCount - _chargedFrame <= 1;
         /// <summary>Seconds of map time left on the current charge.</summary>
@@ -44,27 +44,6 @@ namespace Bobery.Rover
         public event Action Changed;
 
         int _chargedFrame = -10;
-
-        // ---------------------------------------------------------------- charging switch
-        /// <summary>
-        /// Charging mode, switched at the server rack in the cabin. On: beacons charge the battery, but the
-        /// weapons are offline (power is routed to the battery). Off (default): weapons armed, beacons don't charge.
-        /// </summary>
-        public static bool ChargingEnabled { get; private set; }
-        public static event Action ChargingToggled;
-
-        public static void SetCharging(bool on)
-        {
-            if (ChargingEnabled == on) return;
-            ChargingEnabled = on;
-            ChargingToggled?.Invoke();
-            RoverHud.Notify(on ? "Charging ON: weapons offline" : "Charging OFF: weapons armed");
-        }
-
-        public static void ToggleCharging() => SetCharging(!ChargingEnabled);
-
-        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        static void ResetOnPlay() => ChargingEnabled = false;
 
         void Awake() => Charge = Mathf.Clamp(startingCharge, 0f, capacity);
 
@@ -102,10 +81,9 @@ namespace Bobery.Rover
             return used;
         }
 
-        /// <summary>Adds charge (called by beacons). Returns how much was added (nothing while charging is switched off).</summary>
+        /// <summary>Adds charge (called by beacons). Returns how much was added.</summary>
         public float Recharge(float amount)
         {
-            if (!ChargingEnabled) return 0f;
             _chargedFrame = Time.frameCount;
             bool wasEmpty = IsEmpty;
             float add = Mathf.Clamp(amount, 0f, capacity - Charge);

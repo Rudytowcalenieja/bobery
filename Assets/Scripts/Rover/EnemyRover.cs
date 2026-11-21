@@ -25,6 +25,13 @@ namespace Bobery.Rover
         public float projectileSpeed = 40f;
         [Tooltip("Beacons look this much closer than they are when picking a target (0.5 = half the distance).")]
         [Range(0.1f, 1f)] public float decoyBias = 0.7f;
+        [Header("Roaming")]
+        [Tooltip("0 = hunts its target from the start. Otherwise it roams around where it spawned until a target " +
+                 "comes this close (metres) or it gets shot, then hunts like any other enemy.")]
+        public float aggroRange = 0f;
+        [Tooltip("How far from its spawn point it wanders (metres).")]
+        public float roamRadius = 25f;
+        [Range(0.1f, 1f)] public float roamSpeedFactor = 0.45f;
 
         /// <summary>The locked target: a <see cref="RoverController"/> or a <see cref="Beacon"/>.</summary>
         public Component Target { get; private set; }
@@ -32,6 +39,10 @@ namespace Bobery.Rover
         public bool IsFiring => _inRange;
         /// <summary>Outpost this enemy came from (null if it walked in from the wild).</summary>
         public Bobery.Terrain.Outpost Home { get; set; }
+        /// <summary>Spawned as a lone roamer in the wilds (see <see cref="aggroRange"/>).</summary>
+        public bool IsRoamer => aggroRange > 0f;
+        /// <summary>Still wandering: hasn't noticed anything yet.</summary>
+        public bool IsRoaming => IsRoamer && !_aggro;
 
         RoverController _rover;
         Bobery.Terrain.TerrainGenerator _terrain;
@@ -40,6 +51,11 @@ namespace Bobery.Rover
         Light _eye;
         float _yaw, _cooldown, _currentSpeed, _animValue;
         bool _inRange;
+        // Roaming
+        bool _aggro;
+        Vector3 _home, _roamGoal;
+        float _roamWait, _roamGiveUp, _speedScale = 1f, _spawnTime;
+        CombatHealth _health;
         static readonly int SpeedHash = Animator.StringToHash(RoverAnimator.SpeedParam);
 
         public void Init(RoverController rover, Bobery.Terrain.TerrainGenerator terrain, Transform muzzle, Light eye)
@@ -51,6 +67,9 @@ namespace Bobery.Rover
             _animator = GetComponentInChildren<Animator>();
             _yaw = transform.eulerAngles.y;
             _cooldown = fireInterval * Random.Range(0.4f, 1f);
+            _home = _roamGoal = transform.position;
+            _roamWait = Random.Range(0f, 3f);
+            _spawnTime = Time.time;
             PickTarget();
         }
 
@@ -104,6 +123,8 @@ namespace Bobery.Rover
             if (GameOverScreen.IsShown) { Animate(0f); return; }
             if (!TargetValid()) PickTarget();
             if (!Target) { _inRange = false; Drive(Vector3.zero, false); return; }
+            if (IsRoaming && !Noticed()) { Roam(); return; }
+            _speedScale = 1f;
 
             Vector3 to = Target.transform.position - transform.position;
             to.y = 0f;
@@ -123,6 +144,52 @@ namespace Bobery.Rover
             }
 
             if (_eye) _eye.intensity = Mathf.Lerp(_eye.intensity, _inRange ? 3f : 1.2f, Time.deltaTime * 4f);
+        }
+
+        // ================================================================ roaming
+
+        /// <summary>A roamer turns hostile for good once its target is within <see cref="aggroRange"/> or it's shot.</summary>
+        bool Noticed()
+        {
+            if (!_health) _health = GetComponent<CombatHealth>();
+            bool shot = _health && _health.LastHitTime > _spawnTime;
+            if (!shot && Flat(Target.transform.position) > aggroRange) return false;
+            _aggro = true;
+            if (Target is RoverController) RoverHud.Notify(shot ? "Roaming enemy is fighting back!" : "A roaming enemy spotted you!");
+            return true;
+        }
+
+        /// <summary>Strolls between random spots around where it spawned, pausing at each.</summary>
+        void Roam()
+        {
+            _inRange = false;
+            _speedScale = roamSpeedFactor;
+            float dt = Time.deltaTime;
+            Vector3 to = _roamGoal - transform.position;
+            to.y = 0f;
+            _roamGiveUp -= dt;
+            if (to.magnitude < 3f || _roamGiveUp <= 0f) // arrived (or stuck): wait, then pick the next spot
+            {
+                _roamWait -= dt;
+                if (_roamWait <= 0f) { PickRoamGoal(); _roamWait = Random.Range(3f, 8f); }
+                Drive(Vector3.zero, false);
+                return;
+            }
+            Drive(to, true);
+        }
+
+        void PickRoamGoal()
+        {
+            _roamGiveUp = 20f;
+            for (int i = 0; i < 12; i++)
+            {
+                Vector2 r = Random.insideUnitCircle * roamRadius;
+                Vector3 p = _home + new Vector3(r.x, 0f, r.y);
+                if (Vector3.Distance(p, transform.position) < 6f || !Walkable(p)) continue;
+                _roamGoal = p;
+                return;
+            }
+            _roamGoal = transform.position; // nowhere to go: stay put a while
         }
 
         Vector3 Forward() => Quaternion.Euler(0f, _yaw, 0f) * Vector3.forward;
@@ -201,7 +268,7 @@ namespace Bobery.Rover
             }
             else move = false;
 
-            _currentSpeed = Mathf.MoveTowards(_currentSpeed, move ? speed : 0f, speed * 3f * dt);
+            _currentSpeed = Mathf.MoveTowards(_currentSpeed, move ? speed * _speedScale : 0f, speed * 3f * dt);
             Vector3 pos = transform.position + Forward() * (_currentSpeed * dt);
             if (_currentSpeed > 0f && !Walkable(pos)) { pos = transform.position; _currentSpeed = 0f; }
             if (separation.sqrMagnitude > 0.0001f)

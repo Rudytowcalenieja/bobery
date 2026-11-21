@@ -45,6 +45,7 @@ namespace Bobery.Audio
             src.minDistance = 25f;
             src.maxDistance = 260f;
             src.dopplerLevel = 0f;
+            if (!src.GetComponent<AudioGain>()) src.gameObject.AddComponent<AudioGain>();
             return src;
         }
 
@@ -87,12 +88,20 @@ namespace Bobery.Audio
         void Awake()
         {
             var bank = SoundBank.Instance;
-            _menu = Configure(gameObject.AddComponent<AudioSource>(), bank.menuMusic, true, 0f);
-            _fight = Configure(gameObject.AddComponent<AudioSource>(), bank.fightMusic, true, 0f);
+            // Each track on its own object so the gain filter applies to exactly one source.
+            _menu = Configure(Child("MenuMusic").AddComponent<AudioSource>(), bank.menuMusic, true, 0f);
+            _fight = Configure(Child("FightMusic").AddComponent<AudioSource>(), bank.fightMusic, true, 0f);
             _menu.volume = _fight.volume = 0f;
             _menu.priority = _fight.priority = 0;
             _menu.ignoreListenerPause = _fight.ignoreListenerPause = true;
             SceneManager.sceneLoaded += OnSceneLoaded;
+        }
+
+        GameObject Child(string name)
+        {
+            var go = new GameObject(name);
+            go.transform.SetParent(transform, false);
+            return go;
         }
 
         void OnDestroy()

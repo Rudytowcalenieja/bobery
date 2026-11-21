@@ -64,7 +64,7 @@ namespace Bobery.Rover
         InteriorRepairs _repairs;
         CockpitWeapons _weapons;
         FuelStation _fuel;
-        CabinStation _steer, _power;
+        CabinStation _steer;
         RoverBattery _battery;
         Vector3 _camBasePos;
         float _shake;
@@ -119,7 +119,7 @@ namespace Bobery.Rover
             var cabin = _cam && _cam.transform.parent ? _cam.transform.parent : transform.Find("Cabin");
             _repairs.Init(_health, _cam, cabin, crewModel, crewWalkClip, crewRepairClip,
                 () => PointerOverHud() || (_weapons && _weapons.PointerOverUi) || (_fuel && _fuel.PointerOverUi)
-                      || (_steer && _steer.PointerOverUi) || (_power && _power.PointerOverUi), crew);
+                      || (_steer && _steer.PointerOverUi), crew);
 
             // Weapon swapping at the cockpit.
             _weapons = gameObject.AddComponent<CockpitWeapons>();
@@ -141,18 +141,6 @@ namespace Bobery.Rover
                             "PILOT SEAT", "STEER", () => "STEER THE ROVER  [ E ]", Leave);
             }
 
-            // Charging switch at the server rack.
-            var rack = FindInCabin(cabin, "EquipmentRack", null);
-            if (rack)
-            {
-                _power = gameObject.AddComponent<CabinStation>();
-                _power.Blocked = menuOpen;
-                _power.Init(_repairs, _cam, rack, rack.TransformPoint(new Vector3(0f, 0f, -1.0f)), "POWER / CHARGING", "POWER",
-                            () => RoverBattery.ChargingEnabled ? "STOP CHARGING  [ E ]" : "START CHARGING  [ E ]",
-                            RoverBattery.ToggleCharging,
-                            () => RoverBattery.ChargingEnabled ? ("CHARGING ON - weapons offline", RoverUI.Yellow)
-                                                               : ("CHARGING OFF - weapons armed", RoverUI.Green));
-            }
             if (_health) _health.Damaged += OnHullHit;
         }
 
@@ -208,7 +196,7 @@ namespace Bobery.Rover
             RoverUI.TopLeft(eyebrow.rectTransform, pad, pad, inner, 18);
             var title = RoverUI.Label(side, "CABIN", 34, FontStyle.Bold, RoverUI.Accent);
             RoverUI.TopLeft(title.rectTransform, pad, pad + 24, inner, 44);
-            var sub = RoverUI.Label(side, "Left seat: steer.  Right seat: weapons.\nServer rack: charging.  Tank: refuel.", 13, FontStyle.Normal, RoverUI.Dim);
+            var sub = RoverUI.Label(side, "Left seat: steer.  Right seat: weapons.\nTank: refuel.", 13, FontStyle.Normal, RoverUI.Dim);
             RoverUI.TopLeft(sub.rectTransform, pad, pad + 70, inner, 36);
 
             float y = pad + 112;
@@ -368,18 +356,19 @@ namespace Bobery.Rover
             }
         }
 
-        /// <summary>Battery level and the charging switch (set at the server rack).</summary>
+        /// <summary>Battery level. It recharges by itself whenever the rover is parked in a beacon's zone.</summary>
         void UpdatePower()
         {
             if (!_batTrack) return;
-            bool on = RoverBattery.ChargingEnabled;
             float f = _battery ? _battery.Fraction : 0f;
-            _batText.text = _battery ? $"{f * 100f:0}%" + (on ? "  ·  CHARGING ON" : "  ·  CHARGING OFF") : "NO ROVER";
+            bool charging = _battery && _battery.IsCharging && f < 0.999f;
+            _batText.text = _battery ? $"{f * 100f:0}%" + (charging ? "  ·  CHARGING" : "") : "NO ROVER";
             RoverUI.SetBar(_batTrack, _batFill, f);
-            _batFill.GetComponent<Image>().color = !_battery ? RoverUI.Faint : on ? RoverUI.Green : _battery.IsLow ? RoverUI.Red : RoverUI.Accent;
-            _powerText.text = on
-                ? Tag("CHRG", RoverUI.Yellow, "Charging ON: beacons recharge the battery. Weapons offline.")
-                : Tag("ARMD", RoverUI.Green, "Charging OFF: weapons armed. Beacons won't charge.");
+            _batFill.GetComponent<Image>().color = !_battery ? RoverUI.Faint : charging ? RoverUI.Green : _battery.IsLow ? RoverUI.Red : RoverUI.Accent;
+            _powerText.text = charging
+                ? Tag("CHRG", RoverUI.Green, "Beacon in range: charging.")
+                : !_battery || _battery.IsEmpty ? Tag("EMPT", RoverUI.Red, "Battery flat. Park in a beacon's zone to recharge.")
+                : Tag("INFO", RoverUI.Dim, "Recharges inside a beacon's zone.");
         }
 
         static string Tag(string tag, Color c, string msg) => $"<color={RoverUI.Hex(c)}>[{tag}]</color> {msg}";

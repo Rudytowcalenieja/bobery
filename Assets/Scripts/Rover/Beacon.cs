@@ -55,7 +55,7 @@ namespace Bobery.Rover
             : !HasBattery ? $"Not enough battery: need {BatteryCostFraction * 100f:0}%"
             : null;
 
-        public static float Cooldown { get; private set; } = 180f;
+        public static float Cooldown { get; private set; } = 120f;
         /// <summary>Seconds it takes to pick a beacon up (the rover has to stay in its zone). 0 = instant.</summary>
         public static float PickUpTime { get; set; } = 10f;
         /// <summary>Enemy shots a beacon survives.</summary>
@@ -189,7 +189,7 @@ namespace Bobery.Rover
         public bool RoverInside { get; private set; }
 
         [Tooltip("Seconds the beacon needs after a charging session before it can charge again.")]
-        public float cooldown = 180f;
+        public float cooldown = 120f;
         public float CooldownLeft { get; private set; }
         public bool IsCoolingDown => CooldownLeft > 0f;
 
@@ -358,7 +358,7 @@ namespace Bobery.Rover
             }
 
             bool charging = false;
-            if (!IsCoolingDown && !IsPickingUp && inside && _battery && !RoverInterior.IsInside && _battery.Fraction < 0.999f)
+            if (!IsCoolingDown && !IsPickingUp && inside && _battery && _battery.Fraction < 0.999f)
             {
                 _delivered += _battery.Recharge(chargePerSecond * Time.deltaTime);
                 charging = true;

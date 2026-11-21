@@ -12,6 +12,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 07c987ad1e85481cb476cd1594c1215f, type: 3}
   m_Name: SoundBank
   m_EditorClassIdentifier: Assembly-CSharp::Bobery.Audio.SoundBank
+  masterGain: 2
   menuMusic: {fileID: 8300000, guid: 2705cd9991e2dc74f90142a4d6f10c71, type: 3}
   fightMusic: {fileID: 8300000, guid: fe0c19d5c1d930843bd7c3f00f9fdc8e, type: 3}
   musicVolume: 0.45

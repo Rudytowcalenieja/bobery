@@ -11,6 +11,11 @@ namespace Bobery.Audio
     {
         public const string ResourcePath = "SoundBank";
 
+        [Header("Master")]
+        [Tooltip("Loudness multiplier for every game sound, on top of the volumes below (2 = 200%). " +
+                 "Unity caps AudioSource volume at 1, so this is applied as a gain on the samples.")]
+        [Range(0f, 4f)] public float masterGain = 2f;
+
         [Header("Music")]
         public AudioClip menuMusic;
         public AudioClip fightMusic;

@@ -15,7 +15,7 @@ namespace Bobery.Rover
     public class EnemySpawner : MonoBehaviour
     {
         public bool spawnEnemies = true;
-        [Min(0)] public int maxAlive = 3;
+        [Min(0)] public int maxAlive = 6;
 
         [Header("Outposts")]
         [Tooltip("An outpost sends enemies while the rover is within this distance of it (metres).")]
@@ -23,14 +23,14 @@ namespace Bobery.Rover
         [Tooltip("Seconds between the rover coming in range and the first enemy leaving the gate.")]
         [Min(0f)] public float alertDelay = 6f;
         [Tooltip("Enemies one outpost can have out at the same time.")]
-        [Min(1)] public int maxPerOutpost = 2;
+        [Min(1)] public int maxPerOutpost = 4;
 
         [Header("Timing")]
         [Tooltip("Seconds between enemies while an outpost is active.")]
-        [Min(1f)] public float spawnInterval = 35f;
+        [Min(1f)] public float spawnInterval = 17.5f;
         [Tooltip("Each spawn multiplies the interval by this (difficulty ramp), down to minSpawnInterval.")]
         [Range(0.5f, 1f)] public float intervalRamp = 0.93f;
-        [Min(1f)] public float minSpawnInterval = 20f;
+        [Min(1f)] public float minSpawnInterval = 10f;
 
         [Header("No outposts on the map")]
         [Tooltip("Seconds before the first enemy shows up when there are no outposts.")]
@@ -39,6 +39,21 @@ namespace Bobery.Rover
         public Vector2 spawnDistance = new Vector2(60f, 90f);
         [Tooltip("Enemies chasing the rover further than this are recalled.")]
         public float despawnDistance = 170f;
+
+        [Header("Roaming enemies")]
+        [Tooltip("Lone enemies that turn up now and then out in the wilds, away from outposts. They wander about " +
+                 "and only attack once the rover comes close or shoots them.")]
+        public bool spawnRoamers = true;
+        [Tooltip("Roamers alive at once (they don't count towards Max Alive).")]
+        [Min(0)] public int maxRoamers = 4;
+        [Tooltip("Seconds between roamer spawns (randomised by +-30%).")]
+        [Min(5f)] public float roamerInterval = 37.5f;
+        [Tooltip("Roamers appear this far from the rover (metres), out of sight.")]
+        public Vector2 roamerDistance = new Vector2(90f, 140f);
+        [Tooltip("A roamer attacks when the rover (or a beacon) comes this close.")]
+        public float roamerAggroRange = 45f;
+        [Tooltip("No roamers within this distance of an outpost (outposts send their own).")]
+        public float roamerOutpostClearance = 80f;
 
         [Header("Enemy")]
         [Tooltip("Size relative to the rover.")]
@@ -55,12 +70,12 @@ namespace Bobery.Rover
         [Tooltip("Chance (0..1) that a destroyed enemy walker drops a fuel canister. Turrets never drop fuel.")]
         [Range(0f, 1f)] public float fuelDropChance = 0.5f;
         [Tooltip("Litres of carried fuel one canister gives.")]
-        [Min(0f)] public float fuelDropLitres = 20f;
+        [Min(0f)] public float fuelDropLitres = 30f;
 
         [Header("Difficulty per completed outpost")]
         [Tooltip("Enemy damage (walkers and turrets) grows by this share of the base for every completed outpost (0.25 = x1, x1.25, x1.5...).")]
         [Min(0f)] public float damageRampPerOutpost = 0.25f;
-        [Tooltip("Enemy count limits (per outpost and in total) grow by this share of the base for every completed outpost (0.5 = 2, 3, 4...).")]
+        [Tooltip("Enemy count limits (per outpost and in total) grow by this share of the base for every completed outpost (0.5 = 4, 6, 8...).")]
         [Min(0f)] public float countRampPerOutpost = 0.5f;
 
         static EnemySpawner _instance;
@@ -78,7 +93,7 @@ namespace Bobery.Rover
         RoverController _rover;
         RoverAutoFit _fit;
         Bobery.Terrain.TerrainGenerator _terrain;
-        float _timer, _interval;
+        float _timer, _interval, _roamerTimer;
         int _spawned;
 
         void OnEnable() => _instance = this;
@@ -91,6 +106,7 @@ namespace Bobery.Rover
             _terrain = FindAnyObjectByType<Bobery.Terrain.TerrainGenerator>();
             _timer = firstSpawnDelay;
             _interval = spawnInterval;
+            _roamerTimer = roamerInterval * 0.5f;
         }
 
         void Update()
@@ -107,7 +123,8 @@ namespace Bobery.Rover
 
             if (!spawnEnemies || (_fit && !_fit.IsFitted)) return;
             if (RoverInterior.IsInside) return; // a breather while you patch things up
-            if (EnemyRover.All.Count >= MaxAlive) return;
+            UpdateRoamers();
+            if (Count(false) >= MaxAlive) return;
 
             if (HasOutposts())
             {
@@ -126,6 +143,49 @@ namespace Bobery.Rover
             if (_timer > 0f) return;
             if (Spawn()) { _interval = Mathf.Max(minSpawnInterval, _interval * intervalRamp); _timer = _interval; }
             else _timer = 2f; // no free ground this time: retry soon
+        }
+
+        static int Count(bool roamers)
+        {
+            int n = 0;
+            foreach (var e in EnemyRover.All) if (e && e.IsRoamer == roamers) n++;
+            return n;
+        }
+
+        // ================================================================ roamers
+
+        void UpdateRoamers()
+        {
+            if (!spawnRoamers || maxRoamers <= 0 || Count(true) >= maxRoamers) return;
+            _roamerTimer -= Time.deltaTime;
+            if (_roamerTimer > 0f) return;
+            _roamerTimer = SpawnRoamer() ? roamerInterval * Random.Range(0.7f, 1.3f) : 3f;
+        }
+
+        /// <summary>Puts one roamer on open land out of sight of the rover, away from outposts and other roamers.</summary>
+        public bool SpawnRoamer()
+        {
+            HasOutposts();
+            Vector3 c = _rover.transform.position;
+            for (int attempt = 0; attempt < 30; attempt++)
+            {
+                float a = Random.value * Mathf.PI * 2f;
+                Vector3 p = c + new Vector3(Mathf.Cos(a), 0f, Mathf.Sin(a)) * Random.Range(roamerDistance.x, roamerDistance.y);
+                if (!EnemyRover.Walkable(_terrain, p) || NearOutpost(p)) continue;
+                bool crowded = false;
+                foreach (var e in EnemyRover.All) if (e && e.IsRoamer && Flat(e.transform.position, p) < 50f) crowded = true;
+                if (crowded) continue;
+                p.y = EnemyRover.GroundY(_terrain, p);
+                Build(p, roamerAggroRange);
+                return true;
+            }
+            return false;
+        }
+
+        bool NearOutpost(Vector3 p)
+        {
+            foreach (var o in _outposts) if (o && Flat(o.Center, p) < roamerOutpostClearance) return true;
+            return false;
         }
 
         // ================================================================ outposts
@@ -205,7 +265,7 @@ namespace Bobery.Rover
             return false;
         }
 
-        EnemyRover Build(Vector3 at)
+        EnemyRover Build(Vector3 at, float aggroRange = 0f)
         {
             var animator = _rover.GetComponentInChildren<Animator>();
             var source = animator ? animator.gameObject : (_rover.transform.childCount > 0 ? _rover.transform.GetChild(0).gameObject : null);
@@ -268,6 +328,7 @@ namespace Bobery.Rover
             var enemy = root.AddComponent<EnemyRover>();
             enemy.speed = enemySpeed;
             enemy.fireRange = fireRange;
+            enemy.aggroRange = aggroRange;
             enemy.fireInterval = fireInterval;
             enemy.projectileSpeed = projectileSpeed;
             enemy.Init(_rover, _terrain, muzzle, eye);
@@ -279,6 +340,8 @@ namespace Bobery.Rover
         {
             if (!this || !h || Random.value >= fuelDropChance || fuelDropLitres <= 0f) return;
             Vector3 p = h.transform.position;
+            // Walkers fit closer to walls and water than the rover; land the canister where the rover can get it.
+            if (_rover) p = _rover.NearestReachable(p);
             p.y = EnemyRover.GroundY(_terrain, p);
             var go = new GameObject("FuelCanister");
             go.transform.position = p;

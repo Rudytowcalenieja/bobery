@@ -127,6 +127,17 @@ namespace Bobery.Rover
             return true;
         }
 
+        /// <summary>The closest spot to <paramref name="worldPoint"/> the rover can actually drive to (its centre
+        /// keeps the same clearance from walls and water as a planned route). Returns the point itself when it's
+        /// already reachable or no route can be found.</summary>
+        public Vector3 NearestReachable(Vector3 worldPoint)
+        {
+            ConfigurePathfinder();
+            var tmp = new List<Vector3>();
+            if (!_pathfinder.FindPath(transform.position, worldPoint, tmp) || tmp.Count == 0) return worldPoint;
+            return tmp[tmp.Count - 1];
+        }
+
         void ConfigurePathfinder()
         {
             _pathfinder ??= new RoverPathfinder();

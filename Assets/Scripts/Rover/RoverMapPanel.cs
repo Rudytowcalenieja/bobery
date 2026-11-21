@@ -57,8 +57,8 @@ namespace Bobery.Rover
         [Min(1f)] public float beaconRadius = 15f;
         [Tooltip("Battery charge per second while the rover is inside a zone.")]
         [Min(0f)] public float beaconChargePerSecond = 4f;
-        [Tooltip("Seconds a beacon needs after a charging session before it can charge again (180 = 3 min).")]
-        [Min(0f)] public float beaconCooldown = 180f;
+        [Tooltip("Seconds a beacon needs after a charging session before it can charge again (120 = 2 min).")]
+        [Min(0f)] public float beaconCooldown = 120f;
         [Tooltip("Seconds it takes to pick a beacon up; the rover must stay in its zone meanwhile (0 = instant).")]
         [Min(0f)] public float beaconPickUpTime = 10f;
         [Tooltip("Enemy shots a beacon survives.")]
@@ -827,12 +827,8 @@ namespace Bobery.Rover
                 _batFillImg.color = charging ? A(Green, Mathf.Lerp(0.6f, 1f, 0.5f + 0.5f * Mathf.Sin(Time.time * 4f)))
                                   : warn ? A(Red, Mathf.Lerp(0.35f, 1f, blink))
                                   : _battery.Fraction < 0.5f ? Yellow : Accent;
-                // Charging switch (set at the server rack inside the rover): on = beacons charge, weapons offline.
-                string mode = RoverBattery.ChargingEnabled
-                    ? $"  <color={RoverUI.Hex(Yellow)}>· CHRG ON / WPN OFF</color>"
-                    : $"  <color={RoverUI.Hex(Green)}>· ARMED</color>";
-                _batLabel.text = (empty ? "BATTERY [ERR ] DEPLETED" : charging ? "BATTERY [OKAY] CHARGING"
-                               : _battery.IsLow ? "BATTERY [WARN] LOW" : "BATTERY") + mode;
+                _batLabel.text = empty ? "BATTERY [ERR ] DEPLETED" : charging ? "BATTERY [OKAY] CHARGING"
+                               : _battery.IsLow ? "BATTERY [WARN] LOW" : "BATTERY";
                 _batLabel.color = warn || empty ? Red : charging ? Green : Dim;
             }
 
