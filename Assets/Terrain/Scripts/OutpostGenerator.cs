@@ -151,6 +151,11 @@ namespace Bobery.Terrain
 
             for (int i = 0; i < sites.Count; i++)
                 _built.Add(BuildOutpost(root, i, sites[i]));
+
+            // Rebuilt on every load, so never write the (thousands of) pieces into the scene file.
+            if (!Application.isPlaying)
+                foreach (var t in root.GetComponentsInChildren<Transform>(true))
+                    t.gameObject.hideFlags |= HideFlags.DontSaveInEditor;
         }
 
         // ================================================================== one outpost

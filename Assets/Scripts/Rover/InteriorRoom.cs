@@ -27,6 +27,8 @@ namespace Bobery.Rover
         public Transform fuelLevel;
 
         [Header("Repairs")]
+        [Tooltip("Crew character placed in the scene (RepairCrew with its model as the first child). Empty → spawned from crewModel at runtime.")]
+        public RepairCrew crew;
         [Tooltip("Crew member model (Assets/Models/player-walking.fbx). Empty → a capsule stand-in.")]
         public GameObject crewModel;
         [Tooltip("Walk animation (from player-walking.fbx).")]
@@ -133,7 +135,7 @@ namespace Bobery.Rover
             // Leaks on the walls + the crew member who patches them.
             _repairs = gameObject.AddComponent<InteriorRepairs>();
             var cabin = _cam && _cam.transform.parent ? _cam.transform.parent : transform.Find("Cabin");
-            _repairs.Init(_health, _cam, cabin, crewModel, crewWalkClip, crewRepairClip, () => _invOpen || PointerOverHud());
+            _repairs.Init(_health, _cam, cabin, crewModel, crewWalkClip, crewRepairClip, () => _invOpen || PointerOverHud(), crew);
             if (_health) _health.Damaged += OnHullHit;
         }
 
