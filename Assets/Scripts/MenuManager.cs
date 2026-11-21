@@ -17,4 +17,9 @@ public class MenuManager : MonoBehaviour
     {
         SceneManager.LoadSceneAsync("Sebastian");
     }
+
+    public void QuitGame() 
+    {
+        Application.Quit();
+    }
 }
