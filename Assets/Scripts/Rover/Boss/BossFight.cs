@@ -716,6 +716,7 @@ namespace Bobery.Rover
             if (!slam) _impactAge = 0f; // procedural squash only when there's no landing clip
             WeaponFx.Explosion(feet + Vector3.up * _bossHeight * 0.1f, _bossRadius * 0.7f);
             WeaponFx.Shockwave(feet, _arenaRadius * 0.9f);
+            Bobery.Audio.GameAudio.PlayBossSlam(feet);
             for (int i = 0; i < 10; i++)
             {
                 float a = i * Mathf.PI * 2f / 10f;
@@ -989,6 +990,7 @@ namespace Bobery.Rover
             }
 
             // Fall over.
+            Bobery.Audio.GameAudio.PlayBossDeath(_chest.position);
             _poseFrozen = true;
             _pose.localPosition = Vector3.zero;
             _pose.localRotation = Quaternion.identity;
@@ -1024,6 +1026,7 @@ namespace Bobery.Rover
             back.y = GroundY(back);
             WeaponFx.Shockwave(back, _arenaRadius * 0.9f);
             WeaponFx.Explosion(back + Vector3.up * _roverSize * 0.3f, _bossRadius * 0.6f);
+            Bobery.Audio.GameAudio.PlayBossSlam(back, 0.85f); // the body hits the ground: deeper than the landing
             for (int i = 0; i < 6; i++)
             {
                 Vector3 p = Vector3.Lerp(_root.position, back, i / 5f) + Random.insideUnitSphere * _bossRadius * 0.4f;
