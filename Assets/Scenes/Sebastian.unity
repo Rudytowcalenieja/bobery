@@ -984,24 +984,36 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 4911a44ce45f4fb4a4faf73b0fd2331c, type: 3}
   m_Name:
   m_EditorClassIdentifier:
-  style: 0
+  style: 2
   outpostCount: 5
-  padRadius: 20
+  padRadius: 32
   padBlend: 12
-  minSpacing: 110
-  edgeMargin: 40
+  minSpacing: 130
+  edgeMargin: 50
   maxPadHeightDifference: 2.5
-  wallHalfSize: 15
+  wallHalfSize: 22
   wallDamage: 0.22
   buildWatchtower: 1
-  propCount: 14
-  spawnPointsPerOutpost: 6
+  propCount: 26
+  spawnPointsPerOutpost: 8
   panelMaterial: {fileID: 2100000, guid: 316d5db310b94981b2fb64e3655a3be9, type: 2}
   trimMaterial: {fileID: 2100000, guid: 6c7b0ab3a6164e63884f83edb5c091e8, type: 2}
   glowMaterial: {fileID: 2100000, guid: e149c63e34e3427f9e167f9c65493300, type: 2}
   accentMaterial: {fileID: 2100000, guid: e5e0eefe0377473c9e9910982aafad2e, type: 2}
   glassMaterial: {fileID: 2100000, guid: a038cceee7744f9380cab66b0bb2c672, type: 2}
   energyFieldMaterial: {fileID: 2100000, guid: 0f41300d27d647d685e8c73ebeddf2ca, type: 2}
+  oliveMaterial: {fileID: 2100000, guid: 6658652efa9a4740b8dbca2f09bdc187, type: 2}
+  hescoMaterial: {fileID: 2100000, guid: ffd20566b84844f0ae8aeb5db3f315bb, type: 2}
+  corrugatedMaterial: {fileID: 2100000, guid: 20f12a6462a94ff3b34807023771d3a0, type: 2}
+  plasterMaterial: {fileID: 2100000, guid: a403cdffe0564f3d85d9bc6bb63abc2e, type: 2}
+  canvasMaterial: {fileID: 2100000, guid: 92c6f4b3eb4142b983c9ceeeaf62bb3a, type: 2}
+  mudMaterial: {fileID: 2100000, guid: 1274675438ca4b66a1dcf7cf5f38c9af, type: 2}
+  towerPaintMaterial: {fileID: 2100000, guid: a6afae92a3754479bec668c2e6265ace, type: 2}
+  stripeRedMaterial: {fileID: 2100000, guid: 3653c4b19fd84d1aa61ccc97614d8c96, type: 2}
+  stripeWhiteMaterial: {fileID: 2100000, guid: e2e9eb54351d42a895582ad39d56f667, type: 2}
+  rubberMaterial: {fileID: 2100000, guid: bb7ee0b2d7244d0d81de42ccbe6d9e5f, type: 2}
+  lampMaterial: {fileID: 2100000, guid: d09e3bb11da4427ea0a4d40a8f376eb2, type: 2}
+  chainLinkMaterial: {fileID: 2100000, guid: 367c770437fb417496a64fc904a2964b, type: 2}
   concreteMaterial: {fileID: 2100000, guid: fa03d2b759e04e28aa8e0df13d040972, type: 2}
   metalMaterial: {fileID: 2100000, guid: ee9babbe02f14523b722d17f98a4dfd4, type: 2}
   rustMaterial: {fileID: 2100000, guid: 565ad37e30034a34bc56c2d986b02a4b, type: 2}

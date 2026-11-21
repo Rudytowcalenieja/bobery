@@ -13,9 +13,9 @@ namespace Bobery.Terrain
     [ExecuteAlways]
     [DisallowMultipleComponent]
     [RequireComponent(typeof(TerrainGenerator))]
-    public class OutpostGenerator : MonoBehaviour
+    public partial class OutpostGenerator : MonoBehaviour
     {
-        public enum OutpostStyle { SciFi, Wasteland }
+        public enum OutpostStyle { SciFi, Wasteland, Military }
 
         [Header("Style")]
         public OutpostStyle style = OutpostStyle.SciFi;
@@ -33,11 +33,11 @@ namespace Bobery.Terrain
         public float maxPadHeightDifference = 2.5f;
 
         [Header("Layout")]
-        [Range(10f, 18f)] public float wallHalfSize = 15f;
+        [Range(10f, 30f)] public float wallHalfSize = 15f;
         [Tooltip("Chance of wall segments being broken or missing.")]
         [Range(0f, 0.6f)] public float wallDamage = 0.22f;
         public bool buildWatchtower = true;
-        [Range(0, 40)] public int propCount = 14;
+        [Range(0, 60)] public int propCount = 14;
         [Range(0, 16)] public int spawnPointsPerOutpost = 6;
 
         [Header("Sci-Fi Materials")]
@@ -47,6 +47,20 @@ namespace Bobery.Terrain
         public Material accentMaterial;    // red/orange emissive warning lights
         public Material glassMaterial;     // dark glossy windows / solar cells
         public Material energyFieldMaterial;
+
+        [Header("Military Materials")]
+        public Material oliveMaterial;       // Quonset huts, truck, barrels (weathered)
+        public Material hescoMaterial;       // tan wire-mesh barrier blocks (weathered + grid)
+        public Material corrugatedMaterial;  // pitched metal roofs (weathered + stripes)
+        public Material plasterMaterial;     // beige barracks / HQ walls (weathered + seams)
+        public Material canvasMaterial;      // truck tarp
+        public Material mudMaterial;         // muddy road
+        public Material towerPaintMaterial;  // lattice tower
+        public Material stripeRedMaterial;   // boom gate / stop sign
+        public Material stripeWhiteMaterial;
+        public Material rubberMaterial;      // tyres
+        public Material lampMaterial;        // warm floodlight lens
+        public Material chainLinkMaterial;   // fence mesh (alpha-clipped)
 
         [Header("Wasteland Materials")]
         public Material concreteMaterial;
@@ -62,6 +76,7 @@ namespace Bobery.Terrain
         const string RootName = "Outposts";
 
         readonly List<Outpost> _built = new List<Outpost>();
+        readonly List<Mesh> _meshes = new List<Mesh>();   // generated meshes owned by this build
         TerrainGenerator _terrain;
 
         /// <summary>All outposts from the latest generation.</summary>
@@ -82,6 +97,12 @@ namespace Bobery.Terrain
         {
             _wasDisabled = true;
             RequestRegenerate(); // removes the outposts and their flat pads
+        }
+
+        void OnDestroy()
+        {
+            foreach (var m in _meshes) DestroySafe(m);
+            _meshes.Clear();
         }
 
         void RequestRegenerate()
@@ -120,6 +141,9 @@ namespace Bobery.Terrain
                 old.name = RootName + " (old)";
                 DestroySafe(old.gameObject);
             }
+            foreach (var m in _meshes) DestroySafe(m);
+            _meshes.Clear();
+            _coilCache.Clear();
             if (!enabled || sites == null || sites.Count == 0) return;
 
             var root = new GameObject(RootName).transform;
@@ -155,6 +179,13 @@ namespace Bobery.Terrain
             var c = new Ctx { root = go.transform, op = op, rng = new System.Random(site.seed) };
             float W = wallHalfSize;
             float sx = c.Chance(0.5f) ? -1f : 1f; // mirror the layout
+
+            if (style == OutpostStyle.Military)
+            {
+                BuildMilitary(c, W, sx);
+                AddGate(c, W);
+                return op;
+            }
 
             if (style == OutpostStyle.SciFi)
             {
