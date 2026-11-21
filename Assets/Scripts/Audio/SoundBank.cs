@@ -55,6 +55,12 @@ namespace Bobery.Audio
         [Tooltip("One cannon shot of the boss (played on every shot of a volley).")]
         public AudioClip bossShot;
         [Range(0f, 1f)] public float bossShotVolume = 0.9f;
+        [Tooltip("Ground slam: the boss landing from orbit, and its body hitting the ground when it dies. The hit is at the start of the clip.")]
+        public AudioClip bossSlam;
+        [Range(0f, 1f)] public float bossSlamVolume = 1f;
+        [Tooltip("Boss death: starts as the boss begins to fall over.")]
+        public AudioClip bossDeath;
+        [Range(0f, 1f)] public float bossDeathVolume = 1f;
 
         static SoundBank _instance;
         static bool _looked;

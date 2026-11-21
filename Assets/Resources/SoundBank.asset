@@ -33,3 +33,7 @@ MonoBehaviour:
   bossAlarmVolume: 0.9
   bossShot: {fileID: 8300000, guid: 3f0c59141fde7f44092791d848983644, type: 3}
   bossShotVolume: 0.9
+  bossSlam: {fileID: 8300000, guid: 8fcfd3596f264884ab2a752acddef9ed, type: 3}
+  bossSlamVolume: 1
+  bossDeath: {fileID: 8300000, guid: be2541fdb4b96e2458a9e1521c39374e, type: 3}
+  bossDeathVolume: 1

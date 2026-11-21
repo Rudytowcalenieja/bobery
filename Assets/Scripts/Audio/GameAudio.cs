@@ -76,6 +76,22 @@ namespace Bobery.Audio
             PlayAt(bank.bossShot, at, bank.bossShotVolume, 0.3f, Random.Range(0.95f, 1.05f));
         }
 
+        /// <summary>Boss ground slam (the clip's hit is at its start, so call it on the impact frame). Lower pitch = heavier.</summary>
+        public static void PlayBossSlam(Vector3 at, float pitch = 1f)
+        {
+            var bank = SoundBank.Instance;
+            if (!bank) return;
+            PlayAt(bank.bossSlam, at, bank.bossSlamVolume, 0.25f, pitch);
+        }
+
+        /// <summary>Boss death, as it starts to fall.</summary>
+        public static void PlayBossDeath(Vector3 at)
+        {
+            var bank = SoundBank.Instance;
+            if (!bank) return;
+            PlayAt(bank.bossDeath, at, bank.bossDeathVolume, 0.2f);
+        }
+
         /// <summary>Forces the fight music on (it lingers for <see cref="SoundBank.combatLinger"/> seconds).</summary>
         public static void MarkCombat()
         {
