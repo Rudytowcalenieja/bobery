@@ -162,6 +162,7 @@ namespace Bobery.Rover
         // ---- enemies
         RectTransform _enemyRoot;
         readonly List<Image> _enemyMarks = new List<Image>();
+        readonly List<Image> _turretMarks = new List<Image>();
 
         // ---- state
         string _lastState = "";
@@ -556,7 +557,7 @@ namespace Bobery.Rover
                 _enemyRoot.SetSiblingIndex(_roverIcon.GetSiblingIndex()); // under the rover arrow
             }
             Rect r = _map.rect;
-            int shown = 0;
+            int shown = 0, turrets = 0;
             foreach (var e in EnemyRover.All)
             {
                 if (!e) continue;
@@ -578,6 +579,28 @@ namespace Bobery.Rover
                 m.rectTransform.sizeDelta = Vector2.one * (11f + 4f * pulse);
                 m.color = A(Red, 0.75f + 0.25f * pulse);
             }
+            foreach (var t in OutpostTurret.All)
+            {
+                if (!t) continue;
+                Vector2 p = WorldToMapUnclamped(t.transform.position);
+                if (Mathf.Abs(p.x) > r.width * 0.5f + 8f || Mathf.Abs(p.y) > r.height * 0.5f + 8f) continue;
+                while (_turretMarks.Count <= turrets)
+                {
+                    var rt = NewRect("Turret", _enemyRoot);
+                    rt.sizeDelta = new Vector2(9, 9);
+                    rt.localRotation = Quaternion.Euler(0, 0, 45); // diamond
+                    var img = Img(rt, Red);
+                    img.raycastTarget = false;
+                    _turretMarks.Add(img);
+                }
+                var m = _turretMarks[turrets++];
+                m.gameObject.SetActive(true);
+                m.rectTransform.anchoredPosition = p;
+                float pulse = t.IsFiring || t.IsLocking ? 0.5f + 0.5f * Mathf.Sin(Time.time * 14f) : 0f;
+                m.rectTransform.sizeDelta = Vector2.one * (9f + 3f * pulse);
+                m.color = A(Red, 0.7f + 0.3f * pulse);
+            }
+            for (int i = turrets; i < _turretMarks.Count; i++) _turretMarks[i].gameObject.SetActive(false);
             for (int i = shown; i < _enemyMarks.Count; i++) _enemyMarks[i].gameObject.SetActive(false);
         }
 

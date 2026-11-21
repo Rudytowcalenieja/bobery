@@ -20,6 +20,8 @@ namespace Bobery.Rover
         [Range(0f, 1f)] public float lowFraction = 0.3f;
         [Tooltip("Share (0..1) of the maximum health each open leak drains per second.")]
         [Range(0f, 0.05f)] public float leakDamagePerSecond = 0.005f;
+        [Tooltip("Cap (0..1 of max health per second) on the total leak drain, so piled-up leaks can't snowball.")]
+        [Range(0f, 0.1f)] public float maxLeakDrainPerSecond = 0.0075f;
 
         /// <summary>A hole in the cabin wall. Position is abstract (0..1 values) so the interior can map it onto
         /// whatever walls the cabin has; <see cref="id"/> stays stable while the leak exists.</summary>
@@ -42,8 +44,8 @@ namespace Bobery.Rover
         public IReadOnlyList<Leak> Leaks => _leaks;
         /// <summary>Seconds since the last hit (for HUD flashes).</summary>
         public float SinceHit => Time.time - _lastHit;
-        /// <summary>Health lost per second right now through the open leaks.</summary>
-        public float LeakRate => _leaks.Count * maxHealth * leakDamagePerSecond;
+        /// <summary>Health lost per second right now through the open leaks (capped at <see cref="maxLeakDrainPerSecond"/>).</summary>
+        public float LeakRate => maxHealth * Mathf.Min(_leaks.Count * leakDamagePerSecond, maxLeakDrainPerSecond);
 
         /// <summary>Any change: hit, repair.</summary>
         public event Action Changed;

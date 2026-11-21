@@ -112,7 +112,7 @@ namespace Bobery.Rover
 
             if (!interiorCamera)
             {
-                var built = BuildRoomGeometry(transform, CreateMaterials());
+                var built = InteriorCabin.Build(transform, InteriorCabin.CreateMaterials());
                 interiorCamera = built.cam;
                 fuelLevel = built.level;
             }
@@ -159,127 +159,7 @@ namespace Bobery.Rover
             return m.position.ReadValue().x < 400f * _canvasScaler.scaleFactor;
         }
 
-        // ================================================================ room (placeholder geometry)
-
-        public struct RoomMaterials
-        {
-            public Material wall, floor, panel, dark, glow;
-        }
-
-        /// <summary>New (unsaved) materials for the placeholder cabin. The editor saves these as assets.</summary>
-        public static RoomMaterials CreateMaterials()
-        {
-            var lit = Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard");
-            Material Mat(string name, Color c)
-            {
-                var m = new Material(lit) { name = name, color = c };
-                if (m.HasProperty("_BaseColor")) m.SetColor("_BaseColor", c);
-                return m;
-            }
-            var mats = new RoomMaterials
-            {
-                wall = Mat("InteriorWall", new Color(0.16f, 0.16f, 0.17f)),
-                floor = Mat("InteriorFloor", new Color(0.1f, 0.1f, 0.11f)),
-                panel = Mat("InteriorPanel", new Color(0.85f, 0.85f, 0.85f)),
-                dark = Mat("InteriorDark", new Color(0.05f, 0.05f, 0.05f)),
-                glow = Mat("InteriorGlow", Color.white),
-            };
-            if (mats.glow.HasProperty("_EmissionColor"))
-            {
-                mats.glow.EnableKeyword("_EMISSION");
-                mats.glow.globalIlluminationFlags = MaterialGlobalIlluminationFlags.RealtimeEmissive;
-                mats.glow.SetColor("_EmissionColor", Color.white * 1.5f);
-            }
-            return mats;
-        }
-
-        /// <summary>Builds the placeholder cabin (8 x 3 x 6 m) under <paramref name="parent"/>.</summary>
-        public static (Camera cam, Transform level) BuildRoomGeometry(Transform parent, RoomMaterials mats)
-        {
-            var wall = mats.wall; var floor = mats.floor; var panel = mats.panel; var dark = mats.dark; var glow = mats.glow;
-
-            var transform = new GameObject("Cabin").transform;
-            transform.SetParent(parent, false);
-
-            Transform Box(string n, Vector3 pos, Vector3 size, Material m)
-            {
-                var g = GameObject.CreatePrimitive(PrimitiveType.Cube);
-                g.name = n;
-                g.transform.SetParent(transform, false);
-                g.transform.localPosition = pos;
-                g.transform.localScale = size;
-                g.GetComponent<Renderer>().sharedMaterial = m;
-                return g.transform;
-            }
-
-            // Cabin 8 x 3 x 6 m
-            Box("Floor", new Vector3(0, -0.05f, 0), new Vector3(8, 0.1f, 6), floor);
-            Box("Ceiling", new Vector3(0, 3.05f, 0), new Vector3(8, 0.1f, 6), wall);
-            Box("WallBack", new Vector3(0, 1.5f, 3), new Vector3(8, 3, 0.1f), wall);
-            Box("WallFront", new Vector3(0, 1.5f, -3), new Vector3(8, 3, 0.1f), wall);
-            Box("WallLeft", new Vector3(-4, 1.5f, 0), new Vector3(0.1f, 3, 6), wall);
-            Box("WallRight", new Vector3(4, 1.5f, 0), new Vector3(0.1f, 3, 6), wall);
-
-            // Light strips
-            Box("Strip1", new Vector3(0, 2.98f, -1.2f), new Vector3(6, 0.04f, 0.12f), glow);
-            Box("Strip2", new Vector3(0, 2.98f, 1.2f), new Vector3(6, 0.04f, 0.12f), glow);
-
-            // Console + screen on the back wall
-            Box("Console", new Vector3(-1.6f, 0.5f, 2.5f), new Vector3(3, 1, 0.8f), panel);
-            Box("Screen", new Vector3(-1.6f, 1.7f, 2.92f), new Vector3(2.6f, 1.2f, 0.05f), dark);
-            Box("Seat", new Vector3(-1.6f, 0.45f, 1.2f), new Vector3(0.9f, 0.9f, 0.9f), dark);
-
-            // Fuel tank (glass-ish frame with a level column inside)
-            var tankRoot = new GameObject("FuelTank").transform;
-            tankRoot.SetParent(transform, false);
-            tankRoot.localPosition = new Vector3(2.5f, 0f, 2f);
-            var shell = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-            shell.name = "Shell";
-            shell.transform.SetParent(tankRoot, false);
-            shell.transform.localPosition = new Vector3(0, 1.3f, 0);
-            shell.transform.localScale = new Vector3(1.2f, 1.25f, 1.2f);
-            shell.GetComponent<Renderer>().sharedMaterial = dark;
-            const float levelMax = 2.3f;
-            // Level gauge: a glowing strip on the front of the tank, facing the camera.
-            var gaugeBack = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            gaugeBack.name = "GaugeBack";
-            gaugeBack.transform.SetParent(tankRoot, false);
-            gaugeBack.transform.localPosition = new Vector3(0, 0.15f + levelMax * 0.5f, -0.6f);
-            gaugeBack.transform.localScale = new Vector3(0.34f, levelMax + 0.08f, 0.04f);
-            gaugeBack.GetComponent<Renderer>().sharedMaterial = wall;
-            // Level bar at full height; at runtime it shrinks from the bottom.
-            var level = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            level.name = "Level";
-            level.transform.SetParent(tankRoot, false);
-            level.transform.localPosition = new Vector3(0, 0.15f + levelMax * 0.5f, -0.63f);
-            level.transform.localScale = new Vector3(0.26f, levelMax, 0.06f);
-            level.GetComponent<Renderer>().sharedMaterial = glow;
-            Box("Pipe", new Vector3(2.5f, 2.75f, 1.2f), new Vector3(0.15f, 0.15f, 1.8f), panel);
-
-            // Lights
-            var lightGo = new GameObject("CabinLight");
-            lightGo.transform.SetParent(transform, false);
-            lightGo.transform.localPosition = new Vector3(0, 2.6f, 0);
-            var l = lightGo.AddComponent<Light>();
-            l.type = LightType.Point;
-            l.range = 12f;
-            l.intensity = 6f;
-            l.color = new Color(1f, 0.97f, 0.92f);
-
-            // Camera (in the doorway, looking in)
-            var camGo = new GameObject("InteriorCamera");
-            camGo.transform.SetParent(transform, false);
-            camGo.transform.localPosition = new Vector3(0, 1.7f, -2.6f);
-            camGo.transform.localRotation = Quaternion.Euler(12f, 0, 0);
-            var cam = camGo.AddComponent<Camera>();
-            cam.fieldOfView = 70f;
-            cam.clearFlags = CameraClearFlags.SolidColor;
-            cam.backgroundColor = Color.black;
-            cam.nearClipPlane = 0.05f;
-            camGo.AddComponent<AudioListener>();
-            camGo.tag = "MainCamera";
-            return (cam, level.transform);
-        }
+        // Cabin geometry: see InteriorCabin.
 
         // ================================================================ HUD
 

@@ -19,7 +19,7 @@ namespace Bobery.Rover
 
         [Header("Outposts")]
         [Tooltip("An outpost sends enemies while the rover is within this distance of it (metres).")]
-        public float activationRange = 130f;
+        public float activationRange = 60f;
         [Tooltip("Seconds between the rover coming in range and the first enemy leaving the gate.")]
         [Min(0f)] public float alertDelay = 6f;
         [Tooltip("Enemies one outpost can have out at the same time.")]
@@ -44,8 +44,8 @@ namespace Bobery.Rover
         [Tooltip("Size relative to the rover.")]
         [Range(0.1f, 1f)] public float enemyScale = 0.4f;
         public float enemySpeed = 6f;
-        public float fireRange = 26f;
-        public float fireInterval = 6f;
+        public float fireRange = 14f;
+        public float fireInterval = 10f;
         public float projectileSpeed = 40f;
         public Color tint = new Color(0.55f, 0.1f, 0.08f);
 
@@ -112,6 +112,7 @@ namespace Bobery.Rover
             {
                 _outpostScan = Time.time;
                 _outposts = FindObjectsByType<Bobery.Terrain.Outpost>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+                foreach (var o in _outposts) OutpostTurret.Equip(o);
             }
             return _outposts.Length > 0;
         }

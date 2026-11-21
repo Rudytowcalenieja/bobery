@@ -148,9 +148,13 @@ namespace Bobery.Terrain
             DestroySafe(_waterMesh);
         }
 
+        /// <summary>Bumped every time the terrain is regenerated (lets caches know they're stale).</summary>
+        public int Version { get; private set; }
+
         [ContextMenu("Generate")]
         public void Generate()
         {
+            Version++;
             _outposts = GetComponent<OutpostGenerator>();
             SetupLakes();
             BuildTerrain();

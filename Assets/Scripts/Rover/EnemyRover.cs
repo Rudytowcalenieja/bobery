@@ -19,9 +19,9 @@ namespace Bobery.Rover
         public float turnSpeed = 140f;
         [Header("Combat")]
         [Tooltip("Shoots from this far away (metres).")]
-        public float fireRange = 26f;
+        public float fireRange = 14f;
         [Tooltip("Seconds between shots.")]
-        public float fireInterval = 6f;
+        public float fireInterval = 10f;
         public float projectileSpeed = 40f;
         [Tooltip("Beacons look this much closer than they are when picking a target (0.5 = half the distance).")]
         [Range(0.1f, 1f)] public float decoyBias = 0.7f;
@@ -160,20 +160,26 @@ namespace Bobery.Rover
 
         static float Flat2(Vector3 a, Vector3 b) { a.y = 0f; b.y = 0f; return Vector3.Distance(a, b); }
 
+        const float SeparationRadius = 5f;
+        const float SeparationSpeed = 3f; // m/s sidestep when crowded
+
         void Drive(Vector3 toTarget, bool move)
         {
             float dt = Time.deltaTime;
-            Vector3 desired = toTarget;
-
-            // Keep some room from other enemies.
+            // Keep some room from other enemies. This only nudges position (below) and, while walking, bends the
+            // route a little; it never turns an enemy away from what it's shooting at.
+            Vector3 separation = Vector3.zero;
             foreach (var e in All)
             {
                 if (e == this) continue;
                 Vector3 away = transform.position - e.transform.position;
                 away.y = 0f;
                 float d = away.magnitude;
-                if (d > 0.01f && d < 6f) desired += away.normalized * (6f - d) * 3f;
+                if (d < 0.01f) away = Quaternion.Euler(0f, All.IndexOf(this) * 137f, 0f) * Vector3.forward; // exactly stacked
+                if (d < SeparationRadius) separation += away.normalized * (1f - d / SeparationRadius);
             }
+            Vector3 desired = toTarget;
+            if (move && toTarget.sqrMagnitude > 0.0001f) desired = toTarget.normalized + separation * 0.6f;
 
             if (desired.sqrMagnitude > 0.0001f)
             {
@@ -198,6 +204,11 @@ namespace Bobery.Rover
             _currentSpeed = Mathf.MoveTowards(_currentSpeed, move ? speed : 0f, speed * 3f * dt);
             Vector3 pos = transform.position + Forward() * (_currentSpeed * dt);
             if (_currentSpeed > 0f && !Walkable(pos)) { pos = transform.position; _currentSpeed = 0f; }
+            if (separation.sqrMagnitude > 0.0001f)
+            {
+                Vector3 nudged = pos + Vector3.ClampMagnitude(separation, 1f) * (SeparationSpeed * dt);
+                if (Walkable(nudged)) pos = nudged;
+            }
             pos.y = GroundY(pos);
             transform.SetPositionAndRotation(pos, Quaternion.Euler(0f, _yaw, 0f));
             Animate(_currentSpeed / Mathf.Max(0.01f, speed));

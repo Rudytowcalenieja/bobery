@@ -38,6 +38,11 @@ namespace Bobery.Rover
         RepairCrew _crew;
         System.Func<bool> _inputBlocked;
         readonly RaycastHit[] _hits = new RaycastHit[16];
+        // Props (consoles, tanks, seats...) often have no colliders. They get hidden copies of their shape on the
+        // Ignore Raycast layer, used only to keep leaks out from behind them (clicks don't see that layer).
+        readonly List<Collider> _occluders = new List<Collider>();
+        const int OccluderLayer = 2; // Ignore Raycast
+        const int ClickMask = ~(1 << OccluderLayer);
 
         public void Init(RoverHealth health, Camera cam, Transform cabin, GameObject crewModel, AnimationClip walk, AnimationClip repair,
                          System.Func<bool> inputBlocked, RepairCrew sceneCrew = null)
@@ -103,6 +108,33 @@ namespace Bobery.Rover
             }
             if (!any) return;
 
+            foreach (var c in _occluders) if (c) Destroy(c.gameObject);
+            _occluders.Clear();
+            foreach (var mr in renderers)
+            {
+                string nm = mr.name;
+                if (nm.StartsWith("Wall") || nm.StartsWith("Floor") || nm.StartsWith("Ceiling") || nm.StartsWith("Roof")) continue;
+                if (mr.GetComponentInParent<LeakSpot>() || mr.GetComponentInParent<RepairCrew>()) continue;
+                if (mr.GetComponent<Collider>()) continue; // already blocks the physics check
+                if (_cam && mr.bounds.Contains(_cam.transform.position)) continue;
+                var mf = mr.GetComponent<MeshFilter>();
+                if (!mf || !mf.sharedMesh) continue;
+                var go = new GameObject("LeakOccluder") { layer = OccluderLayer };
+                go.transform.SetParent(mr.transform, false);
+                Collider col;
+                if (mf.sharedMesh.isReadable || Application.isEditor)
+                    col = go.AddComponent<MeshCollider>();
+                else
+                {
+                    var box = go.AddComponent<BoxCollider>(); // players can't build colliders from unreadable meshes
+                    box.center = mf.sharedMesh.bounds.center;
+                    box.size = mf.sharedMesh.bounds.size;
+                    col = box;
+                }
+                if (col is MeshCollider mc) mc.sharedMesh = mf.sharedMesh;
+                _occluders.Add(col);
+            }
+
             foreach (var r in renderers)
             {
                 if (!r.name.StartsWith("Wall")) continue;
@@ -151,43 +183,80 @@ namespace Bobery.Rover
             int first = Mathf.Clamp((int)(leak.wall * _walls.Count), 0, _walls.Count - 1);
             // Prefer the stored spot; if it's off-screen or a console/tank hides it, slide along the wall,
             // then try the other walls, until it's visible.
-            for (int k = 0; k < _walls.Count; k++)
+            // Stored spot first: keep it if nothing hides it and no other leak is right there.
+            var home = _walls[first];
+            Vector3 want = home.origin + home.u * leak.u + home.v * leak.v + home.n * 0.02f;
+            pos = want; normal = home.n; // last resort
+            if (!_cam) return true;
+            if (Visible(want, true) && !Crowded(want)) return true;
+
+            // Otherwise scan every wall inside the crew's reach. Best: an uncrowded spot nobody can miss, nearest the
+            // stored one (keeps leaks spread at random). If the visible wall is full, take the visible spot furthest
+            // from the other leaks: overlapping a little beats hiding behind the tank or the console.
+            for (int pass = 0; pass < 2; pass++)
             {
-                var w = _walls[(first + k) % _walls.Count];
-                for (int i = 0; i < 24; i++)
-                {
-                    float u = i == 0 ? leak.u : Mathf.Repeat(leak.u - 0.1f + i * 0.137f, 0.8f) + 0.1f;
-                    float v = i < 12 ? leak.v : Mathf.Repeat(leak.v + 0.17f, 0.35f) + 0.2f;
-                    Vector3 p = w.origin + w.u * u + w.v * v + w.n * 0.02f;
-                    if (k == 0 && i == 0) { pos = p; normal = w.n; } // fallback: the stored spot
-                    if ((!_cam || Visible(p)) && !Crowded(p)) { pos = p; normal = w.n; return true; }
-                }
+                bool strict = pass == 0;
+                float bestFree = float.MaxValue, bestRoom = -1f;
+                Vector3 freePos = default, freeN = default, roomPos = default, roomN = default;
+                foreach (var w in _walls)
+                    for (float u = 0.08f; u <= 0.921f; u += 0.04f)
+                        for (float v = 0.2f; v <= 0.551f; v += 0.05f)
+                        {
+                            Vector3 p = w.origin + w.u * u + w.v * v + w.n * 0.02f;
+                            if (!Visible(p, strict)) continue;
+                            float room = NearestLeak(p);
+                            if (room >= CrowdDistance)
+                            {
+                                float d = Vector3.Distance(p, want);
+                                if (d < bestFree) { bestFree = d; freePos = p; freeN = w.n; }
+                            }
+                            else if (room > bestRoom) { bestRoom = room; roomPos = p; roomN = w.n; }
+                        }
+                if (bestFree < float.MaxValue) { pos = freePos; normal = freeN; return true; }
+                if (bestRoom >= 0f) { pos = roomPos; normal = roomN; return true; }
             }
             return true;
         }
 
-        bool Visible(Vector3 p)
+        bool Visible(Vector3 p, bool props = true)
         {
             Vector3 vp = _cam.WorldToViewportPoint(p);
             if (vp.z <= 0.3f || vp.x < 0.06f || vp.x > 0.94f || vp.y < 0.08f || vp.y > 0.92f) return false;
             Vector3 from = _cam.transform.position;
             Vector3 d = p - from;
-            int n = Physics.RaycastNonAlloc(from, d.normalized, _hits, d.magnitude - 0.03f, ~0, QueryTriggerInteraction.Ignore);
+            int n = Physics.RaycastNonAlloc(from, d.normalized, _hits, d.magnitude - 0.03f, ClickMask, QueryTriggerInteraction.Ignore);
             for (int i = 0; i < n; i++)
             {
                 if (_crew && _hits[i].transform.IsChildOf(_crew.transform)) continue;
                 if (_hits[i].transform.GetComponentInParent<LeakSpot>()) continue;
                 return false;
             }
+            if (props)
+            {
+                // The leak disc is ~0.5 m wide: test its centre and rim so a half-hidden leak counts as hidden.
+                Vector3 right = Vector3.Cross(Vector3.up, (p - from)).normalized * 0.25f;
+                foreach (var q in new[] { p, p + right, p - right, p + Vector3.up * 0.25f, p - Vector3.up * 0.25f })
+                {
+                    Vector3 dq = q - from;
+                    if (Physics.Raycast(from, dq.normalized, dq.magnitude - 0.12f, 1 << OccluderLayer, QueryTriggerInteraction.Ignore))
+                        return false;
+                }
+            }
             return true;
         }
 
         /// <summary>Too close to another leak (keeps them apart so each is easy to click).</summary>
-        bool Crowded(Vector3 p)
+        const float CrowdDistance = 0.8f;
+
+        bool Crowded(Vector3 p) => NearestLeak(p) < CrowdDistance;
+
+        /// <summary>Distance to the closest open leak (keeps them apart so each is easy to click).</summary>
+        float NearestLeak(Vector3 p)
         {
+            float best = float.MaxValue;
             foreach (var s in _spots.Values)
-                if (s && !s.Sealing && Vector3.Distance(s.transform.position, p) < 0.8f) return true;
-            return false;
+                if (s && !s.Sealing) best = Mathf.Min(best, Vector3.Distance(s.transform.position, p));
+            return best;
         }
 
         void SyncLeaks()
@@ -230,7 +299,7 @@ namespace Bobery.Rover
             if (!_cam.pixelRect.Contains(sp) || (_inputBlocked != null && _inputBlocked())) return;
 
             Ray ray = _cam.ScreenPointToRay(sp);
-            int n = Physics.RaycastNonAlloc(ray, _hits, 50f, ~0, QueryTriggerInteraction.Collide);
+            int n = Physics.RaycastNonAlloc(ray, _hits, 50f, ClickMask, QueryTriggerInteraction.Collide);
             RaycastHit best = default;
             bool found = false;
             for (int i = 0; i < n; i++)

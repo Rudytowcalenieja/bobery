@@ -258,36 +258,49 @@ namespace Bobery.Rover.EditorTools
         /// <summary>Builds the cabin under the room with saved material assets and wires up the room's references.</summary>
         public static void BuildInteriorGeometry(InteriorRoom room)
         {
+            // Keep the crew member placed in the scene (it lives inside the Cabin).
+            var crew = room.GetComponentsInChildren<RepairCrew>(true);
+            var crewLocal = new (Vector3 pos, Quaternion rot)[crew.Length];
+            for (int i = 0; i < crew.Length; i++)
+            {
+                crewLocal[i] = (crew[i].transform.localPosition, crew[i].transform.localRotation);
+                crew[i].transform.SetParent(room.transform, true);
+            }
+
             var old = room.transform.Find("Cabin");
             if (old) Object.DestroyImmediate(old.gameObject);
 
-            var built = InteriorRoom.BuildRoomGeometry(room.transform, SaveInteriorMaterials());
-            Undo.RegisterCreatedObjectUndo(built.cam.transform.parent.gameObject, "Build Rover Interior");
+            var sitting = AssetDatabase.LoadAssetAtPath<GameObject>(InteriorCabin.SittingModelPath);
+            var built = InteriorCabin.Build(room.transform, SaveInteriorMaterials(), sitting);
+            var cabin = built.cam.transform.parent;
+            Undo.RegisterCreatedObjectUndo(cabin.gameObject, "Build Rover Interior");
+            for (int i = 0; i < crew.Length; i++)
+            {
+                crew[i].transform.SetParent(cabin, false);
+                crew[i].transform.SetLocalPositionAndRotation(crewLocal[i].pos, crewLocal[i].rot);
+            }
             room.interiorCamera = built.cam;
             room.fuelLevel = built.level;
             EditorUtility.SetDirty(room);
             UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(room.gameObject.scene);
         }
 
-        /// <summary>Reuses the material assets in Assets/Materials/RoverInterior, creating any that are missing.</summary>
-        static InteriorRoom.RoomMaterials SaveInteriorMaterials()
+        /// <summary>
+        /// Saves the cabin materials as assets in Assets/Materials/RoverInterior. Existing ones are kept
+        /// (so colour tweaks made in the editor survive a rebuild); missing ones are created.
+        /// </summary>
+        static Dictionary<string, Material> SaveInteriorMaterials()
         {
             if (!AssetDatabase.IsValidFolder(InteriorMaterialsFolder))
                 AssetDatabase.CreateFolder("Assets/Materials", "RoverInterior");
-            var fresh = InteriorRoom.CreateMaterials();
-            Material Keep(Material m)
+            var mats = new Dictionary<string, Material>();
+            foreach (var kv in InteriorCabin.CreateMaterials())
             {
-                string p = $"{InteriorMaterialsFolder}/{m.name}.mat";
+                string p = $"{InteriorMaterialsFolder}/{kv.Key}.mat";
                 var existing = AssetDatabase.LoadAssetAtPath<Material>(p);
-                if (existing) { Object.DestroyImmediate(m); return existing; }
-                AssetDatabase.CreateAsset(m, p);
-                return m;
+                if (existing) { Object.DestroyImmediate(kv.Value); mats[kv.Key] = existing; }
+                else { AssetDatabase.CreateAsset(kv.Value, p); mats[kv.Key] = kv.Value; }
             }
-            var mats = new InteriorRoom.RoomMaterials
-            {
-                wall = Keep(fresh.wall), floor = Keep(fresh.floor), panel = Keep(fresh.panel),
-                dark = Keep(fresh.dark), glow = Keep(fresh.glow),
-            };
             AssetDatabase.SaveAssets();
             return mats;
         }

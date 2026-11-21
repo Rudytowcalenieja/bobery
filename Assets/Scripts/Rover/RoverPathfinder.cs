@@ -87,11 +87,30 @@ namespace Bobery.Rover
         bool _built;
         public void Invalidate() => _built = false;
 
+        // What the current grid was built from; when nothing changed the grid is reused.
+        int _builtVersion = -1;
+        float _builtCell, _builtClearance, _builtSlope;
+        Matrix4x4 _builtXform;
+
         void Build()
         {
             if (cacheGrid && _built && _n > 0) return;
-            _built = true;
             if (!_terrain) _terrain = Object.FindAnyObjectByType<Bobery.Terrain.TerrainGenerator>();
+
+            // Building the grid samples the full terrain (tens of thousands of cells) and is far too slow
+            // to redo on every request. With a terrain it only changes when the terrain or settings do.
+            if (_terrain && _built && _n > 0
+                && _builtVersion == _terrain.Version
+                && _builtCell == cellSize && _builtClearance == clearance && _builtSlope == maxSlope
+                && _builtXform == _terrain.transform.localToWorldMatrix)
+                return;
+            _built = true;
+            if (_terrain)
+            {
+                _builtVersion = _terrain.Version;
+                _builtCell = cellSize; _builtClearance = clearance; _builtSlope = maxSlope;
+                _builtXform = _terrain.transform.localToWorldMatrix;
+            }
 
             float size;
             Vector3 center;
