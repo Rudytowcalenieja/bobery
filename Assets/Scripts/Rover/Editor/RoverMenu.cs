@@ -270,8 +270,7 @@ namespace Bobery.Rover.EditorTools
             var old = room.transform.Find("Cabin");
             if (old) Object.DestroyImmediate(old.gameObject);
 
-            var sitting = AssetDatabase.LoadAssetAtPath<GameObject>(InteriorCabin.SittingModelPath);
-            var built = InteriorCabin.Build(room.transform, SaveInteriorMaterials(), sitting);
+            var built = InteriorCabin.Build(room.transform, SaveInteriorMaterials());
             var cabin = built.cam.transform.parent;
             Undo.RegisterCreatedObjectUndo(cabin.gameObject, "Build Rover Interior");
             for (int i = 0; i < crew.Length; i++)

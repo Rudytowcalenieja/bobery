@@ -71,8 +71,11 @@ namespace Bobery.Rover
             string reward = rewards != null && CompletedCount - 1 < rewards.Count ? rewards[CompletedCount - 1] : null;
             if (string.IsNullOrEmpty(reward) || WeaponDatabase.Instance.Get(reward) == null) reward = null;
             if (reward != null) WeaponLoadout.Unlock(reward);
+            bool engine = WeaponDatabase.Instance.engineOutpost > 0 && CompletedCount == WeaponDatabase.Instance.engineOutpost;
+            if (engine) RoverUpgrades.UnlockEngine();
             WeaponFx.RewardFlare(o.Center);
-            OutpostRewardBanner.Show(o, reward, CompletedCount, KnownCount);
+            if (reward != null) OutpostRewardBanner.Show(o, reward, CompletedCount, KnownCount);
+            if (engine || reward == null) OutpostRewardBanner.Show(o, engine ? RoverUpgrades.EngineId : null, CompletedCount, KnownCount);
             Completed?.Invoke(o, reward, CompletedCount);
         }
 

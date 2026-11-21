@@ -7,8 +7,8 @@ using UnityEngine.UI;
 namespace Bobery.Rover
 {
     /// <summary>
-    /// Weapon swapping in the rover cabin. Walk the crew member to the cockpit (click the floor between the
-    /// seats, or the dashboard) and a "CHANGE WEAPONS" popup appears. The menu has the turret mount and the
+    /// Weapon swapping in the rover cabin. Walk the crew member to the right-hand (gunner's) seat (click the seat)
+    /// and a "CHANGE WEAPONS" popup appears. The menu has the turret mount and the
     /// storage of unlocked weapons: drag a weapon from storage onto the mount to mount it, or from the mount
     /// into storage to take it off. Weapons are heavy, so a dragged card trails the cursor slowly
     /// (about <see cref="dragSeconds"/> to cross from one side to the other).
@@ -16,10 +16,8 @@ namespace Bobery.Rover
     /// </summary>
     public class CockpitWeapons : MonoBehaviour
     {
-        [Tooltip("Where the crew stands at the cockpit (cabin space, between the seats).")]
-        public Vector3 standLocal = new Vector3(0f, 0f, 1.75f);
-        [Tooltip("Crew within this distance (metres) of the stand point is 'at the cockpit'.")]
-        public float zoneRadius = 1.4f;
+        [Tooltip("Where the crew stands at the gunner's seat (cabin space, just behind the right-hand seat).")]
+        public Vector3 standLocal = new Vector3(1.0f, 0f, 0.8f);
         [Tooltip("Seconds a dragged weapon needs to travel from storage to the mount.")]
         public float dragSeconds = 1f;
 
@@ -55,6 +53,7 @@ namespace Bobery.Rover
         float _dragSpeed;
 
         static readonly RaycastHit[] _hits = new RaycastHit[8];
+        CabinZones.Zone _zone;
         const float CardW = 190f, CardH = 150f;
 
         public void Init(InteriorRepairs repairs, Camera cam, Transform cabin)
@@ -62,8 +61,10 @@ namespace Bobery.Rover
             _repairs = repairs;
             _cam = cam;
             _cabin = cabin ? cabin : transform;
+            // The gunner's seat: the right-hand "Seat" (the left one is for steering).
             foreach (var t in _cabin.GetComponentsInChildren<Transform>(true))
-                if (t.name == "Dashboard") { _dashboard = t; break; }
+                if (t.name == "Seat" && _cabin.InverseTransformPoint(t.position).x > 0f) { _dashboard = t; break; }
+            if (_dashboard) _zone = CabinZones.Add(_dashboard);
             Build();
             WeaponLoadout.Changed += RebuildCards;
         }
@@ -71,6 +72,7 @@ namespace Bobery.Rover
         void OnDestroy()
         {
             WeaponLoadout.Changed -= RebuildCards;
+            if (_zone != null) CabinZones.Remove(_zone);
             if (_canvas) Destroy(_canvas.gameObject);
         }
 
@@ -103,7 +105,8 @@ namespace Bobery.Rover
             Vector2 sp = mouse != null ? mouse.position.ReadValue() : Vector2.zero;
 
             Vector3 stand = StandPoint;
-            CrewAtCockpit = crew && crew.State != RepairCrew.Mode.Repairing && Flat(crew.transform.position, stand) <= zoneRadius;
+            // Anywhere near the gunner's seat counts (the closest station wins, see CabinZones).
+            CrewAtCockpit = crew && crew.State == RepairCrew.Mode.Idle && CabinZones.IsActive(_zone, crew.transform.position);
             if (!CrewAtCockpit && IsOpen) Close();
 
             // Popup above the crew at the cockpit, a small marker over the cockpit otherwise.
@@ -137,7 +140,7 @@ namespace Bobery.Rover
             if (_statusTimer > 0f) { _statusTimer -= Time.unscaledDeltaTime; if (_statusTimer <= 0f) _status.text = ""; }
         }
 
-        /// <summary>Clicking the dashboard walks the crew to the cockpit (after the cabin's own click handling).</summary>
+        /// <summary>Clicking the gunner's seat walks the crew to it (after the cabin's own click handling).</summary>
         void LateUpdate()
         {
             var crew = _repairs ? _repairs.Crew : null;

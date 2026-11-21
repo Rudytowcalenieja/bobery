@@ -21,6 +21,10 @@ namespace Bobery.Rover
         public List<string> outpostRewards = new List<string> { WeaponDef.RailGunId, "", WeaponDef.RocketId };
         public List<WeaponDef> weapons = new List<WeaponDef>();
 
+        [Header("Boost engine")]
+        [Tooltip("The n-th completed outpost installs the boost engine (Shift = speed burst). 0 = never.")]
+        public int engineOutpost = 4;
+
         static WeaponDatabase _instance;
 
         public static WeaponDatabase Instance

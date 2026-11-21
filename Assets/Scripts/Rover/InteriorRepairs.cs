@@ -74,7 +74,37 @@ namespace Bobery.Rover
                 _crew.Place(ClampToFloor(start), _cam ? Quaternion.LookRotation(Flat(_cam.transform.position - start)) : Quaternion.identity);
             }
 
+            // Walk around the furniture instead of through it.
+            BuildNav();
+            _crew.Pathfinder = Nav != null ? Nav.FindPath : (System.Func<Vector3, Vector3, List<Vector3>>)null;
+
             StartCoroutine(FirstSync());
+        }
+
+        /// <summary>Walkable floor of the cabin (null if the cabin has no "Floor" object).</summary>
+        public CabinNav Nav { get; private set; }
+        [Tooltip("Crew member's radius (m): how far the walk path keeps from furniture.")]
+        public float crewRadius = 0.24f;
+
+        void BuildNav()
+        {
+            Nav = null;
+            if (!_hasFloor) return;
+            float floorY = _floor.max.y;
+            var obstacles = new List<Bounds>();
+            foreach (var r in _cabin.GetComponentsInChildren<Renderer>(true))
+            {
+                if (!(r is MeshRenderer) && !(r is SkinnedMeshRenderer)) continue;
+                string nm = r.name;
+                if (nm.StartsWith("Wall") || nm.StartsWith("Floor") || nm.StartsWith("Ceiling") || nm.StartsWith("Roof")) continue;
+                if (r.GetComponentInParent<LeakSpot>() || r.GetComponentInParent<RepairCrew>()) continue;
+                var b = r.bounds;
+                // Only what's in the way of a walking person: not floor markings or things overhead.
+                if (b.max.y < floorY + 0.08f || b.min.y > floorY + 1.9f) continue;
+                if (b.size.x > _floor.size.x * 0.8f && b.size.z > _floor.size.z * 0.8f) continue; // room-sized: a shell piece
+                obstacles.Add(b);
+            }
+            Nav = new CabinNav(_floor, obstacles, crewRadius);
         }
 
         /// <summary>Waits until the room has fitted the camera beside the side panel, so on-screen checks are right.</summary>
@@ -337,6 +367,7 @@ namespace Bobery.Rover
 
         Vector3 ClampToFloor(Vector3 p)
         {
+            if (Nav != null) return Nav.Nearest(p);
             if (!_hasFloor) return p;
             const float m = 0.35f;
             p.x = Mathf.Clamp(p.x, _floor.min.x + m, _floor.max.x - m);

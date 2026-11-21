@@ -44,18 +44,45 @@ namespace Bobery.Rover
         [Tooltip("Size relative to the rover.")]
         [Range(0.1f, 1f)] public float enemyScale = 0.4f;
         public float enemySpeed = 6f;
-        public float fireRange = 14f;
+        public float fireRange = 35f; // far enough that the rover turret (min pitch -35°) can still depress onto them
         public float fireInterval = 10f;
         public float projectileSpeed = 40f;
         public Color tint = new Color(0.55f, 0.1f, 0.08f);
         [Tooltip("Hit points of one enemy walker.")]
         [Min(1f)] public float enemyHealth = 50f;
 
+        [Header("Loot")]
+        [Tooltip("Chance (0..1) that a destroyed enemy walker drops a fuel canister. Turrets never drop fuel.")]
+        [Range(0f, 1f)] public float fuelDropChance = 0.5f;
+        [Tooltip("Litres of carried fuel one canister gives.")]
+        [Min(0f)] public float fuelDropLitres = 20f;
+
+        [Header("Difficulty per completed outpost")]
+        [Tooltip("Enemy damage (walkers and turrets) grows by this share of the base for every completed outpost (0.25 = x1, x1.25, x1.5...).")]
+        [Min(0f)] public float damageRampPerOutpost = 0.25f;
+        [Tooltip("Enemy count limits (per outpost and in total) grow by this share of the base for every completed outpost (0.5 = 2, 3, 4...).")]
+        [Min(0f)] public float countRampPerOutpost = 0.5f;
+
+        static EnemySpawner _instance;
+
+        /// <summary>Multiplier on enemy damage to the rover: +<see cref="damageRampPerOutpost"/> per completed outpost.</summary>
+        public static float DamageMultiplier =>
+            1f + (_instance ? _instance.damageRampPerOutpost : 0.25f) * OutpostProgress.CompletedCount;
+
+        float CountMultiplier => 1f + countRampPerOutpost * OutpostProgress.CompletedCount;
+        /// <summary>Enemies one outpost can have out at once, after the per-outpost ramp.</summary>
+        public int MaxPerOutpost => Mathf.CeilToInt(maxPerOutpost * CountMultiplier - 0.0001f);
+        /// <summary>Enemies alive at once, after the per-outpost ramp.</summary>
+        public int MaxAlive => Mathf.CeilToInt(maxAlive * CountMultiplier - 0.0001f);
+
         RoverController _rover;
         RoverAutoFit _fit;
         Bobery.Terrain.TerrainGenerator _terrain;
         float _timer, _interval;
         int _spawned;
+
+        void OnEnable() => _instance = this;
+        void OnDisable() { if (_instance == this) _instance = null; }
 
         void Start()
         {
@@ -80,7 +107,7 @@ namespace Bobery.Rover
 
             if (!spawnEnemies || (_fit && !_fit.IsFitted)) return;
             if (RoverInterior.IsInside) return; // a breather while you patch things up
-            if (EnemyRover.All.Count >= maxAlive) return;
+            if (EnemyRover.All.Count >= MaxAlive) return;
 
             if (HasOutposts())
             {
@@ -107,6 +134,9 @@ namespace Bobery.Rover
         float _outpostScan = -100f;
         bool _alerted;
 
+        /// <summary>An outpost near the rover has spotted it (enemies are on their way).</summary>
+        public bool Alerted => _alerted;
+
         /// <summary>Outposts are generated with the terrain (possibly after we start), so look again now and then.</summary>
         bool HasOutposts()
         {
@@ -131,7 +161,7 @@ namespace Bobery.Rover
                 if (d > bestD) continue;
                 int count = 0;
                 foreach (var e in EnemyRover.All) if (e && e.Home == o) count++;
-                if (count >= maxPerOutpost) continue;
+                if (count >= MaxPerOutpost) continue;
                 best = o; bestD = d;
             }
             return best;
@@ -230,8 +260,10 @@ namespace Bobery.Rover
             foreach (var r in root.GetComponentsInChildren<Renderer>(true)) r.gameObject.layer = layer;
 
             // Can be shot: 50 HP, hit sphere around the body.
-            root.AddComponent<CombatHealth>().Setup("Enemy walker", enemyHealth,
+            var health = root.AddComponent<CombatHealth>();
+            health.Setup("Enemy walker", enemyHealth,
                 new Vector3(0f, size.y * 0.55f, 0f), Mathf.Max(size.x, size.z) * 0.5f, size.y * 1.35f);
+            health.Died += OnWalkerDied;
 
             var enemy = root.AddComponent<EnemyRover>();
             enemy.speed = enemySpeed;
@@ -240,6 +272,20 @@ namespace Bobery.Rover
             enemy.projectileSpeed = projectileSpeed;
             enemy.Init(_rover, _terrain, muzzle, eye);
             return enemy;
+        }
+
+        /// <summary>A destroyed walker may leave a fuel canister behind (picked up into carried fuel).</summary>
+        void OnWalkerDied(CombatHealth h)
+        {
+            if (!this || !h || Random.value >= fuelDropChance || fuelDropLitres <= 0f) return;
+            Vector3 p = h.transform.position;
+            p.y = EnemyRover.GroundY(_terrain, p);
+            var go = new GameObject("FuelCanister");
+            go.transform.position = p;
+            var pickup = go.AddComponent<FuelPickup>();
+            pickup.litres = fuelDropLitres;
+            pickup.intoTank = false;
+            RoverHud.Notify("Enemy dropped a fuel canister");
         }
 
         void Tint(Material m)

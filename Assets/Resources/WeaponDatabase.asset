@@ -121,3 +121,4 @@ MonoBehaviour:
     selfDamageMax: 0.6
     reloadTime: 4
     flightHeight: 220
+  engineOutpost: 4

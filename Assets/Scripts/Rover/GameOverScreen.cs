@@ -72,6 +72,7 @@ namespace Bobery.Rover
             RoverInterior.ForgetState();
             WeaponLoadout.ResetToDefaults();
             OutpostProgress.ResetAll();
+            RoverUpgrades.ResetAll();
             // Reload the map scene (the first loaded scene, not the interior).
             var scene = RoverInterior.MapScene.IsValid() ? RoverInterior.MapScene : SceneManager.GetActiveScene();
             string path = scene.path;

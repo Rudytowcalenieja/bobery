@@ -1,0 +1,32 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 07c987ad1e85481cb476cd1594c1215f, type: 3}
+  m_Name: SoundBank
+  m_EditorClassIdentifier: Assembly-CSharp::Bobery.Audio.SoundBank
+  menuMusic: {fileID: 8300000, guid: 2705cd9991e2dc74f90142a4d6f10c71, type: 3}
+  fightMusic: {fileID: 8300000, guid: fe0c19d5c1d930843bd7c3f00f9fdc8e, type: 3}
+  musicVolume: 0.45
+  menuMusicWhenCalm: 1
+  calmMusicVolume: 0.25
+  combatLinger: 10
+  musicFade: 2
+  roverStepLoop: {fileID: 8300000, guid: 27842a7ab07e9b44a911e8652d3eb950, type: 3}
+  roverStepVolume: 0.7
+  stepLoopsPerWalkCycle: 1
+  autocannonLoop: {fileID: 8300000, guid: 59051c1ee2cf7a542aed9ab78a3a529d, type: 3}
+  autocannonVolume: 0.6
+  railgunShot: {fileID: 8300000, guid: 76fdab985f45480448d9d29c521b441b, type: 3}
+  railgunVolume: 0.85
+  rocketFlightLoop: {fileID: 8300000, guid: 9fad16d24014e104f9b0c9529a91d59b, type: 3}
+  rocketVolume: 0.8
+  bossAlarm: {fileID: 8300000, guid: fc78c77b77bcea34f86f16bbdd11b608, type: 3}
+  bossAlarmVolume: 0.9

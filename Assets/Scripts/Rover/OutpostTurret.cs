@@ -447,7 +447,7 @@ namespace Bobery.Rover
                 if (_target && !GameOverScreen.IsShown)
                 {
                     if (_target is Beacon b) b.TakeHit();
-                    else if (_target.TryGetComponent<RoverHealth>(out var h)) h.TakeDamage(h.maxHealth * h.damagePerHit * _damageScale);
+                    else if (_target.TryGetComponent<RoverHealth>(out var h)) h.TakeDamage(h.maxHealth * h.damagePerHit * _damageScale * EnemySpawner.DamageMultiplier);
                     ImpactFlash.Spawn(_to);
                 }
                 Destroy(gameObject);

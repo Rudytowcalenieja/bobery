@@ -32,6 +32,8 @@ namespace Bobery.Rover
         public WeaponDef Weapon => _def;
         public bool IsFiring { get; private set; }
         public Transform Muzzle => _muzzle;
+        /// <summary>Time.time of the last gun shot (for the firing sound).</summary>
+        public float LastShotTime { get; private set; } = -100f;
 
         RoverAutoFit _fit;
         RoverBattery _battery;
@@ -295,6 +297,7 @@ namespace Bobery.Rover
             {
                 float cost = _battery ? _def.ShotCost(_battery.capacity) : 0f;
                 if (!RocketLoaded) _noPowerFlash = 0.5f;
+                else if (RoverBattery.ChargingEnabled) _noPowerFlash = 1f; // power goes to the battery
                 else if (_battery && !_battery.TryUse(cost)) _noPowerFlash = 1f;
                 else
                 {
@@ -341,7 +344,7 @@ namespace Bobery.Rover
             var cam = Camera.main;
             var mouse = Mouse.current;
             Vector2 sp = mouse != null ? mouse.position.ReadValue() : Vector2.zero;
-            bool inView = !blocked && cam && mouse != null && cam.pixelRect.Contains(sp);
+            bool inView = !blocked && cam && mouse != null && cam.pixelRect.Contains(sp) && !RoverHatch.PointerOver;
 
             bool rocket = _def != null && _def.kind == WeaponKind.RocketStrike;
             if (rocket) UpdateRocket(cam, sp, inView, mouse);
@@ -359,7 +362,8 @@ namespace Bobery.Rover
                 {
                     _cooldown += _def.FireInterval;
                     if (_cooldown < 0f) _cooldown = 0f;
-                    if (!_battery || _battery.TryUse(_def.ShotCost(_battery.capacity))) Shoot();
+                    if (RoverBattery.ChargingEnabled) _noPowerFlash = 1f; // charging: weapons offline
+                    else if (!_battery || _battery.TryUse(_def.ShotCost(_battery.capacity))) Shoot();
                     else _noPowerFlash = 1f;
                 }
             }
@@ -422,6 +426,8 @@ namespace Bobery.Rover
             _kick = _def.recoilKick;
             _shotPulse = 1f;
             SampleClips(0f);
+            LastShotTime = Time.time;
+            Bobery.Audio.GameAudio.OnGunShot(_def, from);
         }
 
         /// <summary>Closest of: an enemy hit sphere, a collider that isn't the rover or an effect.</summary>
@@ -542,6 +548,7 @@ namespace Bobery.Rover
                 _label.rectTransform.anchoredPosition = sp / k + new Vector2(18, -14);
                 _label.rectTransform.sizeDelta = new Vector2(220, 18);
                 if (_def == null) { _label.text = "NO WEAPON - mount one in the cockpit"; _label.color = RoverUI.Yellow; }
+                else if (RoverBattery.ChargingEnabled) { _label.text = "CHARGING - WEAPONS OFFLINE"; _label.color = RoverUI.Yellow; }
                 else if (_def.kind == WeaponKind.RocketStrike) RocketLabel();
                 else if (_battery && _battery.Charge + 0.0001f < _def.ShotCost(_battery.capacity)) { _label.text = "NO POWER"; _label.color = RoverUI.Red; }
                 else

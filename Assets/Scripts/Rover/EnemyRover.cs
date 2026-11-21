@@ -19,7 +19,7 @@ namespace Bobery.Rover
         public float turnSpeed = 140f;
         [Header("Combat")]
         [Tooltip("Shoots from this far away (metres).")]
-        public float fireRange = 14f;
+        public float fireRange = 35f; // far enough that the rover turret (min pitch -35°) can still depress onto them
         [Tooltip("Seconds between shots.")]
         public float fireInterval = 10f;
         public float projectileSpeed = 40f;
@@ -346,7 +346,7 @@ namespace Bobery.Rover
             if (_target && !GameOverScreen.IsShown)
             {
                 if (_target is Beacon b) b.TakeHit();
-                else if (_target.TryGetComponent<RoverHealth>(out var h)) h.Hit();
+                else if (_target.TryGetComponent<RoverHealth>(out var h)) h.TakeDamage(h.maxHealth * h.damagePerHit * EnemySpawner.DamageMultiplier);
             }
             ImpactFlash.Spawn(transform.position);
             Destroy(gameObject);

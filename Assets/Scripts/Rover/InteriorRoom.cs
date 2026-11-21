@@ -6,10 +6,9 @@ using UnityEngine.UI;
 namespace Bobery.Rover
 {
     /// <summary>
-    /// Rover interior (scene #2): a cabin with a fuel tank, its own camera, a HUD, and the player
-    /// inventory window:
-    ///   I   – open / close inventory (pour fuel into the tank from there)
-    ///   Esc – close inventory, or leave the rover
+    /// Rover interior (scene #2): a cabin with a fuel tank, its own camera and a HUD.
+    ///   LMB – walk / repair a leak / use the fuel tank (<see cref="FuelStation"/>) or the cockpit (<see cref="CockpitWeapons"/>)
+    ///   Esc – close an open menu (leave at the pilot seat)
     /// The cabin geometry lives in the scene (Bobery > Build Rover Interior Geometry) so it can be
     /// edited by hand; only the HUD is built at runtime. If the scene has no geometry yet
     /// (no camera assigned), a placeholder cabin is built at runtime instead.
@@ -17,9 +16,6 @@ namespace Bobery.Rover
     /// </summary>
     public class InteriorRoom : MonoBehaviour
     {
-        [Tooltip("Litres poured per click of the small pour button.")]
-        public float pourStep = 10f;
-
         [Header("Scene references")]
         [Tooltip("Camera that renders the cabin. Its rotation is the resting view; the mouse adds a little parallax.")]
         public Camera interiorCamera;
@@ -67,6 +63,9 @@ namespace Bobery.Rover
         RoverHealth _health;
         InteriorRepairs _repairs;
         CockpitWeapons _weapons;
+        FuelStation _fuel;
+        CabinStation _steer, _power;
+        RoverBattery _battery;
         Vector3 _camBasePos;
         float _shake;
         Camera _cam;
@@ -84,29 +83,15 @@ namespace Bobery.Rover
         float _toastTimer;
         RectTransform _hullTrack, _hullFill, _cursorHint;
         TextMeshProUGUI _hullText, _hullStatus, _cursorHintText;
-
-        // Inventory
-        readonly UIButtons _invButtons = new UIButtons();
-        RectTransform _inv;
-        CanvasGroup _invGroup;
-        RectTransform _slotGrid;
-        TextMeshProUGUI _detailName, _detailAmount, _detailDesc;
-        RectTransform _invGaugeTrack, _invGaugeFill;
-        TextMeshProUGUI _invGaugeText;
-        UIButtons.Button _pourBtn, _fillBtn;
-        string _selected;
-        readonly System.Collections.Generic.List<(RectTransform rt, string id)> _slotRects =
-            new System.Collections.Generic.List<(RectTransform, string)>();
-        bool _invOpen;
-        float _invT;
-        const int Columns = 4, Rows = 3;
-        const float SlotSize = 96f, SlotGap = 10f;
+        RectTransform _batTrack, _batFill;
+        TextMeshProUGUI _batText, _powerText;
 
         void Start()
         {
             var rover = FindAnyObjectByType<RoverController>();
             if (rover) _tank = rover.GetComponent<FuelTank>();
             if (rover) _health = rover.GetComponent<RoverHealth>();
+            if (rover) _battery = rover.GetComponent<RoverBattery>();
 #if UNITY_EDITOR
             FindCrewAssets();
 #endif
@@ -128,26 +113,59 @@ namespace Bobery.Rover
             }
 
             BuildHud();
-            BuildInventory();
-            PlayerInventory.Changed += RebuildSlots;
-            RebuildSlots();
-            SetInventoryOpen(false, instant: true);
 
             // Leaks on the walls + the crew member who patches them.
             _repairs = gameObject.AddComponent<InteriorRepairs>();
             var cabin = _cam && _cam.transform.parent ? _cam.transform.parent : transform.Find("Cabin");
             _repairs.Init(_health, _cam, cabin, crewModel, crewWalkClip, crewRepairClip,
-                () => _invOpen || PointerOverHud() || (_weapons && _weapons.PointerOverUi), crew);
+                () => PointerOverHud() || (_weapons && _weapons.PointerOverUi) || (_fuel && _fuel.PointerOverUi)
+                      || (_steer && _steer.PointerOverUi) || (_power && _power.PointerOverUi), crew);
 
             // Weapon swapping at the cockpit.
             _weapons = gameObject.AddComponent<CockpitWeapons>();
             _weapons.Init(_repairs, _cam, cabin);
+
+            // Refuelling at the fuel tank.
+            _fuel = gameObject.AddComponent<FuelStation>();
+            _fuel.Init(_repairs, _cam, _tank, fuelLevel);
+
+            // Steering at the left-hand seat (the right-hand one is the gunner's: CockpitWeapons).
+            System.Func<bool> menuOpen = () => (_weapons && _weapons.IsOpen) || (_fuel && _fuel.IsOpen);
+            var leftSeat = FindInCabin(cabin, "Seat", t => cabin.InverseTransformPoint(t.position).x < 0f);
+            if (leftSeat)
+            {
+                Vector3 seatLocal = cabin.InverseTransformPoint(leftSeat.position);
+                _steer = gameObject.AddComponent<CabinStation>();
+                _steer.Blocked = menuOpen;
+                _steer.Init(_repairs, _cam, leftSeat, cabin.TransformPoint(new Vector3(seatLocal.x, 0f, seatLocal.z - 0.65f)),
+                            "PILOT SEAT", "STEER", () => "STEER THE ROVER  [ E ]", Leave);
+            }
+
+            // Charging switch at the server rack.
+            var rack = FindInCabin(cabin, "EquipmentRack", null);
+            if (rack)
+            {
+                _power = gameObject.AddComponent<CabinStation>();
+                _power.Blocked = menuOpen;
+                _power.Init(_repairs, _cam, rack, rack.TransformPoint(new Vector3(0f, 0f, -1.0f)), "POWER / CHARGING", "POWER",
+                            () => RoverBattery.ChargingEnabled ? "STOP CHARGING  [ E ]" : "START CHARGING  [ E ]",
+                            RoverBattery.ToggleCharging,
+                            () => RoverBattery.ChargingEnabled ? ("CHARGING ON - weapons offline", RoverUI.Yellow)
+                                                               : ("CHARGING OFF - weapons armed", RoverUI.Green));
+            }
             if (_health) _health.Damaged += OnHullHit;
+        }
+
+        static Transform FindInCabin(Transform cabin, string name, System.Func<Transform, bool> where)
+        {
+            if (!cabin) return null;
+            foreach (var t in cabin.GetComponentsInChildren<Transform>(true))
+                if (t.name == name && (where == null || where(t))) return t;
+            return null;
         }
 
         void OnDestroy()
         {
-            PlayerInventory.Changed -= RebuildSlots;
             if (_health) _health.Damaged -= OnHullHit;
         }
 
@@ -190,8 +208,8 @@ namespace Bobery.Rover
             RoverUI.TopLeft(eyebrow.rectTransform, pad, pad, inner, 18);
             var title = RoverUI.Label(side, "CABIN", 34, FontStyle.Bold, RoverUI.Accent);
             RoverUI.TopLeft(title.rectTransform, pad, pad + 24, inner, 44);
-            var sub = RoverUI.Label(side, "Refuel the rover from your inventory.", 13, FontStyle.Normal, RoverUI.Dim);
-            RoverUI.TopLeft(sub.rectTransform, pad, pad + 72, inner, 20);
+            var sub = RoverUI.Label(side, "Left seat: steer.  Right seat: weapons.\nServer rack: charging.  Tank: refuel.", 13, FontStyle.Normal, RoverUI.Dim);
+            RoverUI.TopLeft(sub.rectTransform, pad, pad + 70, inner, 36);
 
             float y = pad + 112;
             var lbl = RoverUI.Label(side, "ROVER_TANK", 13, FontStyle.Bold, RoverUI.Accent);
@@ -219,13 +237,23 @@ namespace Bobery.Rover
             RoverUI.TopLeft(_hullStatus.rectTransform, pad, y, inner, 44);
             y += 60;
 
-            _hudButtons.Add(side, "INVENTORY  [ I ]", pad, y, inner, 46, true, () => SetInventoryOpen(!_invOpen));
-            y += 56;
-            _hudButtons.Add(side, "LEAVE ROVER  [ ESC ]", pad, y, inner, 46, false, Leave);
+            var bl = RoverUI.Label(side, "ROVER_BATTERY", 13, FontStyle.Bold, RoverUI.Accent);
+            RoverUI.TopLeft(bl.rectTransform, pad, y, inner, 16);
+            _batText = RoverUI.Label(side, "", 12, FontStyle.Bold, RoverUI.White, mono: true);
+            RoverUI.TopLeft(_batText.rectTransform, pad, y, inner, 16);
+            _batText.alignment = TextAlignmentOptions.TopRight;
+            _batTrack = RoverUI.Bar(side, pad, y + 24, inner, 10, out _batFill);
+            y += 50;
+            _powerText = RoverUI.Label(side, "", 14, FontStyle.Bold, RoverUI.White);
+            RoverUI.TopLeft(_powerText.rectTransform, pad, y, inner, 44);
+            y += 60;
+
+            // (Leaving the rover: the pilot seat's STEER popup.)
+            _hudButtons.Add(side, "REFUEL AT THE TANK", pad, y, inner, 46, true, () => { if (_fuel) _fuel.GoToTank(); });
 
             // Footer key hints
             string acc = RoverUI.Hex(RoverUI.Accent);
-            var hint = RoverUI.Label(side, $"<color={acc}><b>[LMB]</b></color> Repair / walk   <color={acc}><b>[I]</b></color> Inventory   <color={acc}><b>[ESC]</b></color> Leave", 12, FontStyle.Normal, RoverUI.Dim, mono: true);
+            var hint = RoverUI.Label(side, $"<color={acc}><b>[LMB]</b></color> Walk / repair / use   <color={acc}><b>[E]</b></color> Open   <color={acc}><b>[ESC]</b></color> Close", 12, FontStyle.Normal, RoverUI.Dim, mono: true);
             hint.rectTransform.anchorMin = new Vector2(0, 0); hint.rectTransform.anchorMax = new Vector2(1, 0);
             hint.rectTransform.pivot = new Vector2(0, 0);
             hint.rectTransform.offsetMin = new Vector2(pad, pad); hint.rectTransform.offsetMax = new Vector2(-pad, pad + 20);
@@ -254,141 +282,6 @@ namespace Bobery.Rover
             RoverUI.Stretch(_cursorHintText.rectTransform);
             _cursorHintText.alignment = TextAlignmentOptions.Center;
             _cursorHint.gameObject.SetActive(false);
-
-            // Inventory lives on the same canvas, above everything.
-            _inv = RoverUI.Rect("Inventory", root);
-        }
-
-        // ================================================================ inventory window
-
-        void BuildInventory()
-        {
-            float gridW = Columns * SlotSize + (Columns - 1) * SlotGap;
-            float gridH = Rows * SlotSize + (Rows - 1) * SlotGap;
-            float detailW = 300f;
-            float w = 40 + gridW + 30 + detailW + 40;
-            float h = 110 + gridH + 40;
-
-            RoverUI.Stretch(_inv);
-            _invGroup = _inv.gameObject.AddComponent<CanvasGroup>();
-            var dim = RoverUI.Rect("Dim", _inv);
-            RoverUI.Stretch(dim);
-            RoverUI.Img(dim, new Color(0, 0, 0, 0.7f));
-
-            var card = RoverUI.Rect("Card", _inv);
-            RoverUI.Center(card, w, h, 200f, 0f);
-            RoverUI.Img(card, RoverUI.Black);
-            RoverUI.Outline(card, RoverUI.Faint);
-
-            var eyebrow = RoverUI.Label(card, RoverUI.Crumbs("ROOT", "PLAYER", "INVENTORY"), 12, FontStyle.Bold, RoverUI.Dim);
-            RoverUI.TopLeft(eyebrow.rectTransform, 40, 32, 300, 16);
-            var title = RoverUI.Label(card, "INVENTORY", 30, FontStyle.Bold, RoverUI.Accent);
-            RoverUI.TopLeft(title.rectTransform, 40, 50, 300, 40);
-            var close = RoverUI.Rect("Close", card);
-            close.anchorMin = close.anchorMax = new Vector2(1, 1);
-            close.pivot = new Vector2(1, 1);
-            close.anchoredPosition = new Vector2(-30, -30);
-            close.sizeDelta = new Vector2(36, 36);
-            _invButtons.Wrap(close, "×", false, () => SetInventoryOpen(false), 16);
-
-            _slotGrid = RoverUI.Rect("Slots", card);
-            RoverUI.TopLeft(_slotGrid, 40, 110, gridW, gridH);
-
-            // Details
-            float dx = 40 + gridW + 30;
-            var div = RoverUI.Rect("Divider", card);
-            RoverUI.TopLeft(div, dx - 15, 110, 1, gridH);
-            RoverUI.Img(div, RoverUI.Faint);
-
-            _detailName = RoverUI.Label(card, "", 22, FontStyle.Bold, RoverUI.White);
-            RoverUI.TopLeft(_detailName.rectTransform, dx, 110, detailW, 30);
-            _detailAmount = RoverUI.Label(card, "", 14, FontStyle.Bold, RoverUI.Dim, mono: true);
-            RoverUI.TopLeft(_detailAmount.rectTransform, dx, 142, detailW, 20);
-            _detailDesc = RoverUI.Label(card, "", 13, FontStyle.Normal, RoverUI.Dim);
-            RoverUI.TopLeft(_detailDesc.rectTransform, dx, 172, detailW, 60);
-
-            var tl = RoverUI.Label(card, "ROVER_TANK", 11, FontStyle.Bold, RoverUI.Accent);
-            RoverUI.TopLeft(tl.rectTransform, dx, 240, detailW, 14);
-            _invGaugeText = RoverUI.Label(card, "", 11, FontStyle.Bold, RoverUI.White, mono: true);
-            RoverUI.TopLeft(_invGaugeText.rectTransform, dx, 240, detailW, 14);
-            _invGaugeText.alignment = TextAlignmentOptions.TopRight;
-            _invGaugeTrack = RoverUI.Bar(card, dx, 260, detailW, 8, out _invGaugeFill);
-
-            float bw = (detailW - 10f) / 2f;
-            _pourBtn = _invButtons.Add(card, $"POUR {pourStep:0} L", dx, 286, bw, 44, false, () => Pour(pourStep));
-            _fillBtn = _invButtons.Add(card, "FILL TANK", dx + bw + 10, 286, bw, 44, true, () => Pour(float.MaxValue));
-        }
-
-        void RebuildSlots()
-        {
-            if (!_slotGrid) return;
-            for (int i = _slotGrid.childCount - 1; i >= 0; i--) Destroy(_slotGrid.GetChild(i).gameObject);
-            _slotRects.Clear();
-
-            var ids = PlayerInventory.ItemIds;
-            if (_selected == null || PlayerInventory.Get(_selected) <= 0f) _selected = ids.Count > 0 ? ids[0] : null;
-
-            for (int i = 0; i < Columns * Rows; i++)
-            {
-                int cx = i % Columns, cy = i / Columns;
-                var slot = RoverUI.Rect("Slot" + i, _slotGrid);
-                RoverUI.TopLeft(slot, cx * (SlotSize + SlotGap), cy * (SlotSize + SlotGap), SlotSize, SlotSize);
-                bool has = i < ids.Count;
-                bool sel = has && ids[i] == _selected;
-                RoverUI.Img(slot, sel ? RoverUI.A(RoverUI.Accent, 0.12f) : RoverUI.Ghost);
-                RoverUI.Outline(slot, sel ? RoverUI.Accent : RoverUI.Faint, sel ? 2f : 1f);
-                if (!has) continue;
-
-                string id = ids[i];
-                var icon = RoverUI.Rect("Icon", slot);
-                RoverUI.Center(icon, 30, 40, 0, 10);
-                RoverUI.Img(icon, RoverUI.Accent);
-                var capRt = RoverUI.Rect("Cap", icon);
-                capRt.anchorMin = capRt.anchorMax = new Vector2(0.7f, 1f);
-                capRt.pivot = new Vector2(0.5f, 0f);
-                capRt.sizeDelta = new Vector2(8, 6);
-                RoverUI.Img(capRt, RoverUI.Accent);
-
-                var name = RoverUI.Label(slot, PlayerInventory.NameOf(id).ToUpperInvariant(), 10, FontStyle.Bold, RoverUI.Dim);
-                RoverUI.TopLeft(name.rectTransform, 8, 6, SlotSize - 16, 14);
-                var amt = RoverUI.Label(slot, $"{PlayerInventory.Get(id):0.#} {PlayerInventory.UnitOf(id)}", 12, FontStyle.Bold, RoverUI.White, mono: true);
-                amt.rectTransform.anchorMin = new Vector2(0, 0); amt.rectTransform.anchorMax = new Vector2(1, 0);
-                amt.rectTransform.pivot = new Vector2(0.5f, 0);
-                amt.rectTransform.offsetMin = new Vector2(6, 6); amt.rectTransform.offsetMax = new Vector2(-6, 22);
-                amt.alignment = TextAlignmentOptions.Bottom;
-
-                _slotRects.Add((slot, id));
-            }
-            UpdateDetails();
-        }
-
-        void UpdateDetails()
-        {
-            if (_selected == null)
-            {
-                _detailName.text = "EMPTY";
-                _detailAmount.text = "";
-                _detailDesc.text = "Nothing in your inventory. Collect fuel on the map.";
-            }
-            else
-            {
-                _detailName.text = PlayerInventory.NameOf(_selected).ToUpperInvariant();
-                _detailAmount.text = $"{PlayerInventory.Get(_selected):0.#} {PlayerInventory.UnitOf(_selected)}";
-                _detailDesc.text = PlayerInventory.DescriptionOf(_selected);
-            }
-            bool fuelSel = _selected == PlayerInventory.Fuel;
-            bool canPour = fuelSel && _tank && FuelTank.Reserve > 0f && _tank.Fuel < _tank.capacity - 0.01f;
-            _pourBtn.enabled = canPour;
-            _fillBtn.enabled = canPour;
-            _pourBtn.rt.gameObject.SetActive(fuelSel);
-            _fillBtn.rt.gameObject.SetActive(fuelSel);
-        }
-
-        void Pour(float litres)
-        {
-            if (!_tank) { Toast("No rover tank found"); return; }
-            float added = _tank.RefuelFromInventory(litres);
-            Toast(added > 0f ? $"+{added:0.#} L in the tank" : _tank.Fuel >= _tank.capacity - 0.01f ? "Tank is full" : "No fuel to pour");
         }
 
         // ================================================================ runtime
@@ -398,35 +291,19 @@ namespace Bobery.Rover
             var kb = Keyboard.current;
             if (kb != null && !GameOverScreen.IsShown)
             {
-                if (kb.iKey.wasPressedThisFrame && !(_weapons && _weapons.IsOpen)) SetInventoryOpen(!_invOpen);
                 if (kb.escapeKey.wasPressedThisFrame)
                 {
                     if (_weapons && _weapons.IsOpen) _weapons.Close();
-                    else if (_invOpen) SetInventoryOpen(false);
-                    else Leave();
+                    else if (_fuel && _fuel.IsOpen) _fuel.Close();
+                    // Leaving is done at the pilot seat (or the LEAVE ROVER button), not with Esc.
                 }
             }
 
-            if (_invOpen)
-            {
-                _invButtons.Update();
-                var mouse = Mouse.current;
-                if (mouse != null && mouse.leftButton.wasPressedThisFrame)
-                {
-                    Vector2 sp = mouse.position.ReadValue();
-                    foreach (var (rt, id) in _slotRects)
-                        if (rt && RectTransformUtility.RectangleContainsScreenPoint(rt, sp, null)) { _selected = id; RebuildSlots(); break; }
-                }
-            }
-            else if (!(_weapons && _weapons.IsOpen)) _hudButtons.Update();
-
-            // Inventory fade/scale
-            _invT = Mathf.MoveTowards(_invT, _invOpen ? 1f : 0f, Time.unscaledDeltaTime / 0.18f);
-            _invGroup.alpha = _invT;
-            _inv.gameObject.SetActive(_invT > 0.001f);
+            if (!(_weapons && _weapons.IsOpen)) _hudButtons.Update();
 
             UpdateGauges();
             UpdateHull();
+            UpdatePower();
             AnimateRoom();
 
             if (_toastTimer > 0f)
@@ -441,20 +318,16 @@ namespace Bobery.Rover
             float fuel = _tank ? _tank.Fuel : 0f, cap = _tank ? _tank.capacity : 1f;
             string g = _tank ? $"{fuel:0.0} / {cap:0} L" : "NO ROVER";
             _gaugeText.text = g;
-            _invGaugeText.text = g;
             RoverUI.SetBar(_gaugeTrack, _gaugeFill, fuel / cap);
-            RoverUI.SetBar(_invGaugeTrack, _invGaugeFill, fuel / cap);
             _reserveText.text = $"CARRIED FUEL   {FuelTank.Reserve:0.#} L";
             Color barC = !_tank ? RoverUI.Faint : _tank.IsLow || _tank.IsEmpty ? RoverUI.Red : fuel / cap < 0.5f ? RoverUI.Yellow : RoverUI.Accent;
             _gaugeFill.GetComponent<Image>().color = barC;
-            _invGaugeFill.GetComponent<Image>().color = barC;
 
             if (!_tank) _statusText.text = "";
-            else if (_tank.IsEmpty && FuelTank.Reserve > 0f) _statusText.text = Tag("ERR ", RoverUI.Red, "Tank empty. Open the inventory (I) and pour fuel in.");
-            else if (_tank.IsLow) _statusText.text = Tag("WARN", RoverUI.Yellow, "Fuel low.");
+            else if (_fuel && _fuel.Pumping) _statusText.text = Tag("FUEL", RoverUI.Accent, "Pumping fuel into the tank...");
+            else if (_tank.IsEmpty && FuelTank.Reserve > 0f) _statusText.text = Tag("ERR ", RoverUI.Red, "Tank empty. Click the fuel tank and pump fuel in.");
+            else if (_tank.IsLow) _statusText.text = Tag("WARN", RoverUI.Yellow, "Fuel low. Click the fuel tank to refuel.");
             else _statusText.text = Tag("OKAY", RoverUI.Green, "Ready to go.");
-
-            if (_invOpen) UpdateDetails();
         }
 
         void UpdateHull()
@@ -484,7 +357,7 @@ namespace Bobery.Rover
 
             // Cursor hint over a leak.
             var m = Mouse.current;
-            bool show = _repairs && _repairs.Hovered && m != null && !_invOpen;
+            bool show = _repairs && _repairs.Hovered && m != null && !(_fuel && _fuel.IsOpen);
             _cursorHint.gameObject.SetActive(show);
             if (show)
             {
@@ -493,6 +366,20 @@ namespace Bobery.Rover
                 float s = _canvasScaler ? _canvasScaler.scaleFactor : 1f;
                 _cursorHint.anchoredPosition = m.position.ReadValue() / s + new Vector2(18, -18);
             }
+        }
+
+        /// <summary>Battery level and the charging switch (set at the server rack).</summary>
+        void UpdatePower()
+        {
+            if (!_batTrack) return;
+            bool on = RoverBattery.ChargingEnabled;
+            float f = _battery ? _battery.Fraction : 0f;
+            _batText.text = _battery ? $"{f * 100f:0}%" + (on ? "  ·  CHARGING ON" : "  ·  CHARGING OFF") : "NO ROVER";
+            RoverUI.SetBar(_batTrack, _batFill, f);
+            _batFill.GetComponent<Image>().color = !_battery ? RoverUI.Faint : on ? RoverUI.Green : _battery.IsLow ? RoverUI.Red : RoverUI.Accent;
+            _powerText.text = on
+                ? Tag("CHRG", RoverUI.Yellow, "Charging ON: beacons recharge the battery. Weapons offline.")
+                : Tag("ARMD", RoverUI.Green, "Charging OFF: weapons armed. Beacons won't charge.");
         }
 
         static string Tag(string tag, Color c, string msg) => $"<color={RoverUI.Hex(c)}>[{tag}]</color> {msg}";
@@ -526,13 +413,6 @@ namespace Bobery.Rover
                 _shake = Mathf.Max(0f, _shake - Time.deltaTime);
                 _cam.transform.localPosition = _camBasePos + Random.insideUnitSphere * (0.08f * _shake * _shake * 4f);
             }
-        }
-
-        void SetInventoryOpen(bool open, bool instant = false)
-        {
-            _invOpen = open;
-            if (instant) { _invT = open ? 1f : 0f; _invGroup.alpha = _invT; _inv.gameObject.SetActive(open); }
-            if (open) RebuildSlots();
         }
 
         void Leave()

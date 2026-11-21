@@ -24,7 +24,15 @@ namespace Bobery.Rover
         public AnimationClip repairClip;
         public event System.Action<LeakSpot> Finished;
 
+        /// <summary>Plans a route (from, to) → waypoints around the furniture. Null = walk straight.</summary>
+        public System.Func<Vector3, Vector3, List<Vector3>> Pathfinder;
+        /// <summary>Busy at a station (e.g. pumping fuel): plays the work animation while standing still.</summary>
+        public bool Working { get; set; }
+        /// <summary>Direction to face while <see cref="Working"/>.</summary>
+        public Vector3 WorkFacing { get; set; }
+
         Vector3 _dest;
+        readonly List<Vector3> _path = new List<Vector3>();
         Transform _hips;
         Vector3 _hipsRest;
         PlayableGraph _graph;
@@ -115,12 +123,16 @@ namespace Bobery.Rover
         {
             transform.SetPositionAndRotation(at, rot);
             _dest = at;
+            _path.Clear();
         }
+
+        /// <summary>Where the current walk ends (after snapping to the walkable area).</summary>
+        public Vector3 Destination => _dest;
 
         public void WalkTo(Vector3 p)
         {
             CancelRepair();
-            _dest = p;
+            Route(p);
             State = Mode.Walking;
         }
 
@@ -129,8 +141,20 @@ namespace Bobery.Rover
             if (Leak == leak && State != Mode.Idle) return;
             CancelRepair();
             Leak = leak;
-            _dest = stand;
+            Route(stand);
             State = Mode.Walking;
+        }
+
+        void Route(Vector3 p)
+        {
+            _path.Clear();
+            var route = Pathfinder?.Invoke(transform.position, p);
+            if (route != null && route.Count > 0)
+            {
+                foreach (var w in route) _path.Add(new Vector3(w.x, transform.position.y, w.z));
+            }
+            else _path.Add(p);
+            _dest = _path[_path.Count - 1];
         }
 
         void CancelRepair()
@@ -150,7 +174,13 @@ namespace Bobery.Rover
             {
                 case Mode.Walking:
                 {
-                    Vector3 to = _dest - transform.position; to.y = 0f;
+                    // Pass intermediate waypoints without stopping; only the last one is the destination.
+                    Vector3 to = (_path.Count > 0 ? _path[0] : _dest) - transform.position; to.y = 0f;
+                    while (_path.Count > 1 && to.magnitude < 0.15f)
+                    {
+                        _path.RemoveAt(0);
+                        to = _path[0] - transform.position; to.y = 0f;
+                    }
                     float d = to.magnitude;
                     if (d > 0.05f)
                     {
@@ -160,8 +190,9 @@ namespace Bobery.Rover
                         float step = Mathf.Min(d, walkSpeed * dt * Mathf.Clamp01(1.2f - face / 90f));
                         transform.position += to.normalized * step;
                     }
-                    if (d <= 0.06f)
+                    if (d <= 0.06f && _path.Count <= 1)
                     {
+                        _path.Clear();
                         transform.position = new Vector3(_dest.x, transform.position.y, _dest.z);
                         State = Leak ? Mode.Repairing : Mode.Idle;
                         Progress = 0f;
@@ -185,6 +216,9 @@ namespace Bobery.Rover
                     }
                     break;
                 }
+                case Mode.Idle:
+                    if (Working) Turn(WorkFacing, dt);
+                    break;
             }
             if (dt > 0f)
             {
@@ -205,7 +239,8 @@ namespace Bobery.Rover
         {
             if (!_hasGraph) return;
             float walkTarget = State == Mode.Walking ? 1f : 0f;
-            float repairTarget = State == Mode.Repairing ? 1f : 0f;
+            bool working = State == Mode.Repairing || (State == Mode.Idle && Working);
+            float repairTarget = working ? 1f : 0f;
             Blend(Mathf.MoveTowards(_walkW, walkTarget, dt / 0.2f), Mathf.MoveTowards(_repairW, repairTarget, dt / 0.25f));
 
             // Idle = the walk clip held on its first frame.
@@ -213,7 +248,7 @@ namespace Bobery.Rover
             // (a minimum keeps the legs going while turning on the spot).
             _walk.SetSpeed(State == Mode.Walking ? Mathf.Max(_moveSpeed, walkSpeed * 0.25f) / _clipGroundSpeed : 0f);
             if (State != Mode.Walking && _walkW < 0.01f) _walk.SetTime(0);
-            _repair.SetSpeed(State == Mode.Repairing ? 1f : 0f);
+            _repair.SetSpeed(working ? 1f : 0f);
             Loop(_walk);
             Loop(_repair);
         }

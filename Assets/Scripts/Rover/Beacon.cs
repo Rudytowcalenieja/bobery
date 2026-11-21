@@ -12,10 +12,10 @@ namespace Bobery.Rover
     public static class BeaconNetwork
     {
         /// <summary>Total beacons the player owns (deployed + in stock).</summary>
-        public static int Capacity { get; private set; } = 4;
+        public static int Capacity { get; private set; } = 2;
         /// <summary>Share (0..1) of the rover's tank capacity and battery capacity spent to drop a beacon.</summary>
         public static float FuelCostFraction { get; private set; } = 0.1f;
-        public static float BatteryCostFraction { get; private set; } = 0.1f;
+        public static float BatteryCostFraction { get; private set; } = 0f;
         public static float Radius { get; private set; } = 15f;
         public static float ChargePerSecond { get; private set; } = 4f;
 
@@ -45,7 +45,9 @@ namespace Bobery.Rover
         public static bool HasFuel { get { FindRover(); return !_tank || _tank.Fuel + 0.0001f >= FuelCost; } }
         public static bool HasBattery { get { FindRover(); return !_battery || _battery.Charge + 0.0001f >= BatteryCost; } }
         public static bool CanAfford => HasFuel && HasBattery;
-        public static string CostText => $"FUEL -{FuelCostFraction * 100f:0}%  BATT -{BatteryCostFraction * 100f:0}%";
+        public static string CostText => BatteryCostFraction > 0f
+            ? $"FUEL -{FuelCostFraction * 100f:0}%  BATT -{BatteryCostFraction * 100f:0}%"
+            : $"FUEL -{FuelCostFraction * 100f:0}%";
         /// <summary>Why the player can't afford a beacon right now, or null.</summary>
         public static string CostProblem =>
             !HasFuel && !HasBattery ? $"Not enough fuel and battery: need {CostText}"
@@ -156,7 +158,7 @@ namespace Bobery.Rover
         {
             _deployed.Clear();
             Destroyed = 0;
-            Capacity = 4;
+            Capacity = 2;
             MaxHits = 5;
             CastTime = 3f;
             Changed = null;

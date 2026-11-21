@@ -164,9 +164,9 @@ MonoBehaviour:
   groundMask:
     serializedVersion: 2
     m_Bits: 4294967295
-  beaconCount: 4
+  beaconCount: 2
   beaconFuelCostPercent: 10
-  beaconBatteryCostPercent: 10
+  beaconBatteryCostPercent: 0
   beaconRadius: 15
   beaconChargePerSecond: 4
   beaconCooldown: 180

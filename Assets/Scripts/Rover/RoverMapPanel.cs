@@ -48,11 +48,11 @@ namespace Bobery.Rover
 
         [Header("Beacons")]
         [Tooltip("How many charging beacons the player owns.")]
-        [Min(0)] public int beaconCount = 4;
+        [Min(0)] public int beaconCount = 2;
         [Tooltip("Percent of the rover's tank capacity spent to drop one beacon.")]
         [Range(0f, 100f)] public float beaconFuelCostPercent = 10f;
         [Tooltip("Percent of the rover's battery capacity spent to drop one beacon.")]
-        [Range(0f, 100f)] public float beaconBatteryCostPercent = 10f;
+        [Range(0f, 100f)] public float beaconBatteryCostPercent = 0f;
         [Tooltip("Radius of a beacon's charging zone (metres).")]
         [Min(1f)] public float beaconRadius = 15f;
         [Tooltip("Battery charge per second while the rover is inside a zone.")]
@@ -155,6 +155,10 @@ namespace Bobery.Rover
 
         // ---- hull
         RoverHealth _health;
+        RoverEngine _engine;
+        RectTransform _engBlock, _engTrack, _engFill;
+        Image _engFillImg;
+        TextMeshProUGUI _engValue, _engLabel;
         RectTransform _hullTrack, _hullFill;
         Image _hullFillImg;
         TextMeshProUGUI _hullValue, _hullLabel;
@@ -218,7 +222,11 @@ namespace Bobery.Rover
             if (rover) _battery = rover.GetComponent<RoverBattery>();
             if (_battery) { _battery.RanOut += OnBatteryOut; _battery.Restored += OnBatteryRestored; }
             if (rover) _health = rover.GetComponent<RoverHealth>();
+            if (rover) _engine = rover.GetComponent<RoverEngine>();
             RoverHud.Notified += Toast;
+
+            // Going inside: the "ENTER ROVER" popup over the hatch on the rover's roof.
+            if (rover) gameObject.AddComponent<RoverHatch>().Init(rover);
         }
 
         void OnDestroy()
@@ -383,12 +391,11 @@ namespace Bobery.Rover
             y += 22;
 
             // ---- Actions
-            float bw = (inner - gap) / 2f;
-            AddButton("STOP", Pad, y, bw, 46, filled: false, () =>
+            // (Entering the rover: the popup over the roof hatch, see RoverHatch.)
+            AddButton("STOP", Pad, y, inner, 46, filled: false, () =>
             {
                 if (rover && rover.HasDestination) { rover.Stop(); Toast("Rover stopped"); }
             });
-            AddButton("ENTER ROVER [E]", Pad + bw + gap, y, bw, 46, filled: true, RoverInterior.Enter);
 
             // ---- Footer (pinned to bottom)
             var footer = NewRect("Footer", _panel);
@@ -402,12 +409,12 @@ namespace Bobery.Rover
             float kx = 0f;
             kx = KeyHint(footer, kx, "LMB", "Go");
             kx = KeyHint(footer, kx, "RMB", "Stop");
-            kx = KeyHint(footer, kx, "WHEEL", "Zoom");
-            KeyHint(footer, kx, "E", "Enter");
+            KeyHint(footer, kx, "WHEEL", "Zoom");
 
             BuildFuelBlock(inner);
             BuildBatteryBlock(inner);
             BuildHullBlock(inner);
+            BuildEngineBlock(inner);
             BuildCastBar(canvasGo.transform);
         }
 
@@ -419,7 +426,7 @@ namespace Bobery.Rover
             var block = NewRect("Hull", _panel);
             block.anchorMin = block.anchorMax = new Vector2(0, 0);
             block.pivot = new Vector2(0, 0);
-            block.anchoredPosition = new Vector2(Pad, Pad + 56 + 70 + 12 + 34 + 12);
+            block.anchoredPosition = new Vector2(Pad, Pad + 56 + 70 + 8 + 34 + 8);
             block.sizeDelta = new Vector2(inner, 34);
 
             _hullLabel = Label(block, "HULL", 12, FontStyle.Bold, Dim);
@@ -469,6 +476,69 @@ namespace Bobery.Rover
                             : leaks > 0 ? "HULL [WARN] LEAKING"
                             : _health.IsRegenerating ? "HULL [OK  ] MENDING" : "HULL";
             _hullLabel.color = _health.IsLow || hit ? Red : leaks > 0 ? Yellow : Dim;
+        }
+
+        // ================================================================ boost engine
+
+        /// <summary>Boost engine gauge, just above the hull gauge. Hidden until the engine is unlocked.</summary>
+        void BuildEngineBlock(float inner)
+        {
+            _engBlock = NewRect("Engine", _panel);
+            _engBlock.anchorMin = _engBlock.anchorMax = new Vector2(0, 0);
+            _engBlock.pivot = new Vector2(0, 0);
+            _engBlock.anchoredPosition = new Vector2(Pad, Pad + 56 + 70 + 8 + 34 + 8 + 34 + 8);
+            _engBlock.sizeDelta = new Vector2(inner, 30);
+
+            _engLabel = Label(_engBlock, "ENGINE", 12, FontStyle.Bold, Dim);
+            TopLeft(_engLabel.rectTransform, 0, 0, inner, 16);
+            _engValue = Label(_engBlock, "", 13, FontStyle.Bold, White, _mono);
+            TopLeft(_engValue.rectTransform, 0, -2, inner, 18);
+            _engValue.alignment = TextAlignmentOptions.TopRight;
+
+            _engTrack = NewRect("Track", _engBlock);
+            TopLeft(_engTrack, 0, 20, inner, 10);
+            Img(_engTrack, Ghost);
+            Outline(_engTrack, Faint, 1);
+            _engFill = NewRect("Fill", _engTrack);
+            _engFill.anchorMin = new Vector2(0, 0); _engFill.anchorMax = new Vector2(0, 1);
+            _engFill.pivot = new Vector2(0, 0.5f);
+            _engFill.offsetMin = new Vector2(2, 2); _engFill.offsetMax = new Vector2(2, -2);
+            _engFillImg = Img(_engFill, Accent);
+            _engFill.SetAsFirstSibling();
+            _engBlock.gameObject.SetActive(false);
+        }
+
+        void UpdateEngine()
+        {
+            if (!_engBlock) return;
+            bool on = _engine && _engine.Unlocked;
+            if (_engBlock.gameObject.activeSelf != on) _engBlock.gameObject.SetActive(on);
+            if (!on) return;
+
+            float w = _engTrack.rect.width - 4f;
+            _engFill.sizeDelta = new Vector2(w * _engine.Charge, _engFill.sizeDelta.y);
+            if (_engine.IsBoosting)
+            {
+                float pulse = 0.5f + 0.5f * Mathf.Sin(Time.time * 14f);
+                _engFillImg.color = Color.Lerp(Yellow, White, pulse * 0.5f);
+                _engLabel.text = "ENGINE [BOOST] ACTIVE";
+                _engLabel.color = Yellow;
+                _engValue.text = $"{_engine.BoostLeft:0.0}s";
+            }
+            else if (_engine.IsCoolingDown)
+            {
+                _engFillImg.color = A(Accent, 0.45f);
+                _engLabel.text = "ENGINE [WAIT] COOLING";
+                _engLabel.color = Dim;
+                _engValue.text = $"{_engine.CooldownLeft:0.0}s";
+            }
+            else
+            {
+                _engFillImg.color = Green;
+                _engLabel.text = "ENGINE [OKAY] READY";
+                _engLabel.color = Green;
+                _engValue.text = "SHIFT";
+            }
         }
 
         // ================================================================ beacon cast
@@ -709,7 +779,7 @@ namespace Bobery.Rover
             var block = NewRect("Battery", _panel);
             block.anchorMin = block.anchorMax = new Vector2(0, 0);
             block.pivot = new Vector2(0, 0);
-            block.anchoredPosition = new Vector2(Pad, Pad + 56 + 70 + 12);
+            block.anchoredPosition = new Vector2(Pad, Pad + 56 + 70 + 8);
             block.sizeDelta = new Vector2(inner, 34);
 
             _batLabel = Label(block, "BATTERY", 12, FontStyle.Bold, Dim);
@@ -757,8 +827,12 @@ namespace Bobery.Rover
                 _batFillImg.color = charging ? A(Green, Mathf.Lerp(0.6f, 1f, 0.5f + 0.5f * Mathf.Sin(Time.time * 4f)))
                                   : warn ? A(Red, Mathf.Lerp(0.35f, 1f, blink))
                                   : _battery.Fraction < 0.5f ? Yellow : Accent;
-                _batLabel.text = empty ? "BATTERY [ERR ] DEPLETED" : charging ? "BATTERY [OKAY] CHARGING"
-                               : _battery.IsLow ? "BATTERY [WARN] LOW" : "BATTERY";
+                // Charging switch (set at the server rack inside the rover): on = beacons charge, weapons offline.
+                string mode = RoverBattery.ChargingEnabled
+                    ? $"  <color={RoverUI.Hex(Yellow)}>· CHRG ON / WPN OFF</color>"
+                    : $"  <color={RoverUI.Hex(Green)}>· ARMED</color>";
+                _batLabel.text = (empty ? "BATTERY [ERR ] DEPLETED" : charging ? "BATTERY [OKAY] CHARGING"
+                               : _battery.IsLow ? "BATTERY [WARN] LOW" : "BATTERY") + mode;
                 _batLabel.color = warn || empty ? Red : charging ? Green : Dim;
             }
 
@@ -1340,6 +1414,7 @@ namespace Bobery.Rover
             UpdateFuel();
             UpdateBattery();
             UpdateHull();
+            UpdateEngine();
             UpdateBeacons();
             UpdateEnemies();
             UpdateOutpostArrows();
@@ -1369,7 +1444,6 @@ namespace Bobery.Rover
                 return;
             }
             var kb = Keyboard.current;
-            if (kb != null && kb.eKey.wasPressedThisFrame) { RoverInterior.Enter(); return; }
 
             var mouse = Mouse.current;
             if (mouse == null) return;

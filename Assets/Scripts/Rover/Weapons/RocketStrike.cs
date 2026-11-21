@@ -33,6 +33,8 @@ namespace Bobery.Rover
         ParticleSystem _exhaust, _flame;
         Light _light;
         LineRenderer _ring;
+        AudioSource _motor;
+        float _motorVol;
 
         /// <summary>
         /// Takes over <paramref name="visual"/> (a rocket whose +Z is the nose, pointing at the rover's rear) and sends it
@@ -84,6 +86,48 @@ namespace Bobery.Rover
 
             _ring = WeaponFx.NewRing("RocketTarget", transform);
             WeaponFx.PlaceRing(_ring, Target, _def.blastRadius, RoverUI.Red, 0.35f);
+
+            // Rocket motor sound: follows the rocket (not parented to it, the visual is hidden mid-flight).
+            var bank = Bobery.Audio.SoundBank.Instance;
+            if (bank && bank.rocketFlightLoop)
+            {
+                var ag = new GameObject("RocketMotor");
+                ag.transform.SetParent(transform, false);
+                _motor = Bobery.Audio.GameAudio.Configure(ag.AddComponent<AudioSource>(), bank.rocketFlightLoop, true, 0.85f);
+                _motor.maxDistance = 400f;
+                _motorVol = bank.rocketVolume;
+            }
+        }
+
+        /// <summary>Motor sound: starts on ignition, fades out of sight, comes back screaming down on the target.</summary>
+        void UpdateMotor(float dt)
+        {
+            if (!_motor) return;
+            _motor.transform.position = _visual.position;
+            switch (_phase)
+            {
+                case Phase.Drop:
+                    _motor.volume = 0f;
+                    break;
+                case Phase.Exit:
+                case Phase.Climb:
+                    if (!_motor.isPlaying) { _motor.time = 0f; _motor.Play(); }
+                    _motor.volume = _motorVol;
+                    _motor.pitch = _phase == Phase.Climb ? Mathf.Lerp(1f, 1.15f, _t / ClimbTime) : 1f;
+                    break;
+                case Phase.Hidden:
+                    _motor.volume = Mathf.MoveTowards(_motor.volume, 0f, dt * _motorVol / 0.3f);
+                    if (_motor.volume <= 0.001f && _motor.isPlaying) _motor.Stop();
+                    break;
+                case Phase.Fall:
+                {
+                    float k = Mathf.Clamp01(_t / FallTime);
+                    if (!_motor.isPlaying) { _motor.time = 0f; _motor.Play(); }
+                    _motor.volume = _motorVol * Mathf.Lerp(0.5f, 1f, k); // louder as it comes in
+                    _motor.pitch = Mathf.Lerp(1.05f, 1.4f, k * k);      // and higher, like a falling whistle
+                    break;
+                }
+            }
         }
 
         void SetExhaust(bool on)
@@ -183,6 +227,7 @@ namespace Bobery.Rover
                     break;
                 }
             }
+            if (this) UpdateMotor(dt);
         }
 
         Vector3 Bezier(float u)

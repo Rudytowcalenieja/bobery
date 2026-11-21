@@ -78,6 +78,14 @@ namespace Bobery.Rover
                 if (def.kind == WeaponKind.RocketStrike) CockpitWeapons.RocketSilhouette(_icon, RoverUI.Yellow);
                 else CockpitWeapons.Silhouette(_icon, RoverUI.Yellow, def.damage >= 10f);
             }
+            else if (e.reward == RoverUpgrades.EngineId)
+            {
+                _cardTop.text = "UPGRADE INSTALLED";
+                _cardTop.color = RoverUI.Yellow;
+                _fullName = "BOOST ENGINE";
+                _cardHint.text = "Press SHIFT while driving for a speed burst";
+                EngineSilhouette(_icon, RoverUI.Yellow);
+            }
             else
             {
                 _cardTop.text = "SALVAGE";
@@ -141,6 +149,28 @@ namespace Bobery.Rover
             _cardName.color = reward ? RoverUI.White : RoverUI.Dim;
             _cardHint.alpha = Smooth((t - 1.6f) / 0.4f);
             _icon.localScale = Vector3.one * (1f + 0.06f * Mathf.Sin(t * 4f) * (reward ? 1f : 0f));
+        }
+
+        static void EngineSilhouette(RectTransform icon, Color c)
+        {
+            void Box(float x, float y, float w, float h)
+            {
+                var rt = RoverUI.Rect("Px", icon);
+                rt.anchorMin = rt.anchorMax = new Vector2(0, 0);
+                rt.pivot = Vector2.zero;
+                rt.anchoredPosition = new Vector2(x, y);
+                rt.sizeDelta = new Vector2(w, h);
+                RoverUI.Img(rt, c);
+            }
+            Box(40, 12, 76, 32);        // block
+            Box(52, 44, 10, 8);         // intake
+            Box(72, 44, 10, 8);
+            Box(92, 44, 10, 8);
+            Box(116, 18, 14, 20);       // nozzle
+            Box(130, 14, 8, 28);
+            Box(14, 22, 10, 12);        // flame
+            Box(26, 18, 12, 20);
+            Box(46, 4, 64, 8);          // mount
         }
 
         static float Smooth(float x) { x = Mathf.Clamp01(x); return x * x * (3f - 2f * x); }

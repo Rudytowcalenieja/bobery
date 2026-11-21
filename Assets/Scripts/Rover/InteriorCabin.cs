@@ -70,15 +70,8 @@ namespace Bobery.Rover
 
         // ================================================================ build
 
-        /// <summary>Same scale as the walking crew member (player-walking.fbx), so both characters match.</summary>
-        public const float CharacterScale = 0.34f;
-        public const string SittingModelPath = "Assets/Models/player-sitting.fbx";
-
-        /// <summary>
-        /// Builds the cabin under <paramref name="parent"/>. Returns its camera and the fuel level bar.
-        /// <paramref name="sittingModel"/> (optional) is seated in the left pilot seat.
-        /// </summary>
-        public static (Camera cam, Transform level) Build(Transform parent, Dictionary<string, Material> mats, GameObject sittingModel = null)
+        /// <summary>Builds the cabin under <paramref name="parent"/>. Returns its camera and the fuel level bar.</summary>
+        public static (Camera cam, Transform level) Build(Transform parent, Dictionary<string, Material> mats)
         {
             var b = new Builder(mats);
             var cabin = b.Group("Cabin", parent, Vector3.zero);
@@ -87,9 +80,8 @@ namespace Bobery.Rover
             BuildStructure(b, cabin);
             BuildWindshield(b, cabin);
             BuildDashboard(b, cabin);
-            var leftSeat = b.Seat(cabin, new Vector3(-1.0f, 0f, 1.45f));
-            b.Seat(cabin, new Vector3(1.0f, 0f, 1.45f));
-            if (sittingModel) b.Sitter(leftSeat, sittingModel, CharacterScale);
+            b.Seat(cabin, new Vector3(-1.0f, 0f, 1.45f));  // steering (see InteriorRoom)
+            b.Seat(cabin, new Vector3(1.0f, 0f, 1.45f));   // weapons
             BuildRack(b, cabin);
             BuildLockers(b, cabin);
             BuildWorkbench(b, cabin);
@@ -449,22 +441,6 @@ namespace Bobery.Rover
                 foreach (float s in new[] { -1f, 1f })
                     Box(g, "Armrest", new Vector3(s * 0.34f, 0.66f, 0f), new Vector3(0.07f, 0.06f, 0.5f), "CabinTrim");
                 return g;
-            }
-
-            /// <summary>Static seated character (player-sitting.fbx) facing the dashboard, feet on the floor.</summary>
-            public void Sitter(Transform seat, GameObject model, float scale)
-            {
-                var go = Object.Instantiate(model, seat, false);
-                go.name = "SittingCrew";
-                go.transform.localRotation = Quaternion.identity; // the model faces +Z, like the seat
-                go.transform.localScale = Vector3.one * scale;
-                go.transform.localPosition = Vector3.zero;
-                foreach (var c in go.GetComponentsInChildren<Collider>(true)) Object.DestroyImmediate(c);
-                var rs = go.GetComponentsInChildren<Renderer>(true);
-                if (rs.Length == 0) return;
-                Bounds b = rs[0].bounds;
-                foreach (var r in rs) b.Encapsulate(r.bounds);
-                go.transform.position += Vector3.up * (seat.position.y - b.min.y);
             }
         }
     }

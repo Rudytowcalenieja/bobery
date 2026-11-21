@@ -66,6 +66,8 @@ namespace Bobery.Rover
 
         public float CurrentSpeed => _currentSpeed;
         public float TopSpeed => maxForwardSpeed * speedMultiplier;
+        /// <summary>Extra speed factor on top of the cruise speed (set by <see cref="RoverEngine"/> while boosting).</summary>
+        public float SpeedBoost { get; set; } = 1f;
         public float TopTurnRate => turnSpeed * Mathf.Sqrt(speedMultiplier);
         /// <summary>Current yaw rate in degrees/second (positive = turning right).</summary>
         public float CurrentTurn => _currentTurn;
@@ -204,6 +206,12 @@ namespace Bobery.Rover
 
             // Gun on the turret slot (aims at the mouse, fires on LMB).
             if (!GetComponent<RoverTurret>()) gameObject.AddComponent<RoverTurret>();
+
+            // Boost engine (Shift), mounted once the outpost reward unlocks it.
+            if (!GetComponent<RoverEngine>()) gameObject.AddComponent<RoverEngine>();
+
+            // Footsteps in time with the walk animation, gun loops.
+            if (!GetComponent<RoverAudio>()) gameObject.AddComponent<RoverAudio>();
         }
 
         void Update()
@@ -242,8 +250,8 @@ namespace Bobery.Rover
         {
             float dt = Time.fixedDeltaTime;
 
-            float targetSpeed = _throttle * TopSpeed;
-            float rate = TopSpeed / Mathf.Max(0.01f, speedRampTime);
+            float targetSpeed = _throttle * TopSpeed * SpeedBoost;
+            float rate = TopSpeed * Mathf.Max(1f, SpeedBoost) / Mathf.Max(0.01f, speedRampTime);
             _currentSpeed = Mathf.MoveTowards(_currentSpeed, targetSpeed, rate * dt);
             _currentTurn = Mathf.MoveTowards(_currentTurn, _steer * TopTurnRate, turnAcceleration * speedMultiplier * dt);
 
