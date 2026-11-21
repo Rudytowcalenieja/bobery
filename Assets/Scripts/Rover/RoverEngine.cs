@@ -104,7 +104,8 @@ namespace Bobery.Rover
             else if (_cooldownLeft > 0f) _cooldownLeft = Mathf.Max(0f, _cooldownLeft - dt);
 
             var kb = Keyboard.current;
-            if (kb != null && !TutorialTips.IsOpen && (kb.leftShiftKey.wasPressedThisFrame || kb.rightShiftKey.wasPressedThisFrame)) TryBoost();
+            // In the boss fight Shift is the dodge (BossFight), not a boost.
+            if (kb != null && !TutorialTips.IsOpen && !BossFight.IsActive && (kb.leftShiftKey.wasPressedThisFrame || kb.rightShiftKey.wasPressedThisFrame)) TryBoost();
 
             // Ease the speed in/out a little so the burst doesn't snap.
             float target = IsBoosting ? boostMultiplier : 1f;

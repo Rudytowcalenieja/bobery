@@ -31,3 +31,5 @@ MonoBehaviour:
   rocketVolume: 0.8
   bossAlarm: {fileID: 8300000, guid: fc78c77b77bcea34f86f16bbdd11b608, type: 3}
   bossAlarmVolume: 0.9
+  bossShot: {fileID: 8300000, guid: 3f0c59141fde7f44092791d848983644, type: 3}
+  bossShotVolume: 0.9

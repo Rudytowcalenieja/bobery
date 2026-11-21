@@ -123,6 +123,7 @@ namespace Bobery.Rover
 
             if (!spawnEnemies || (_fit && !_fit.IsFitted)) return;
             if (RoverInterior.IsInside) return; // a breather while you patch things up
+            if (BossFight.IsActive) return;     // the boss brings its own escorts (SpawnEscort)
             UpdateRoamers();
             if (Count(false) >= MaxAlive) return;
 
@@ -263,6 +264,14 @@ namespace Bobery.Rover
                 return true;
             }
             return false;
+        }
+
+        /// <summary>One hostile walker at <paramref name="at"/> (boss escorts). Null if the spawner isn't ready.</summary>
+        public EnemyRover SpawnEscort(Vector3 at)
+        {
+            if (!_rover) return null;
+            at.y = EnemyRover.GroundY(_terrain, at);
+            return Build(at);
         }
 
         EnemyRover Build(Vector3 at, float aggroRange = 0f)

@@ -58,7 +58,7 @@ namespace Bobery.Audio
                 PlayAt(bank.railgunShot, muzzle, bank.railgunVolume, 0.4f, Random.Range(0.97f, 1.03f));
         }
 
-        /// <summary>Boss alarm siren. Not wired to anything yet - call it when the boss shows up.</summary>
+        /// <summary>Boss alarm siren (played by BossFight when the boss comes down).</summary>
         public static void PlayBossAlarm()
         {
             var bank = SoundBank.Instance;
@@ -66,6 +66,14 @@ namespace Bobery.Audio
             var cam = Camera.main;
             PlayAt(bank.bossAlarm, cam ? cam.transform.position : Vector3.zero, bank.bossAlarmVolume, 0f);
             if (_instance) _instance._lastCombat = Time.unscaledTime; // straight into the fight track
+        }
+
+        /// <summary>One boss cannon shot.</summary>
+        public static void PlayBossShot(Vector3 at)
+        {
+            var bank = SoundBank.Instance;
+            if (!bank) return;
+            PlayAt(bank.bossShot, at, bank.bossShotVolume, 0.3f, Random.Range(0.95f, 1.05f));
         }
 
         /// <summary>Forces the fight music on (it lingers for <see cref="SoundBank.combatLinger"/> seconds).</summary>

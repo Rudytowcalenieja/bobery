@@ -51,6 +51,11 @@ namespace Bobery.Audio
         public AudioClip bossAlarm;
         [Range(0f, 1f)] public float bossAlarmVolume = 0.9f;
 
+        [Header("Boss")]
+        [Tooltip("One cannon shot of the boss (played on every shot of a volley).")]
+        public AudioClip bossShot;
+        [Range(0f, 1f)] public float bossShotVolume = 0.9f;
+
         static SoundBank _instance;
         static bool _looked;
 

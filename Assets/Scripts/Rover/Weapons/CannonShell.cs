@@ -10,6 +10,7 @@ namespace Bobery.Rover
     public class CannonShell : MonoBehaviour
     {
         CombatHealth _target;
+        WeaponDef _def;
         Vector3 _end, _normal;
         float _speed, _damage, _fx;
         bool _solid;
@@ -67,6 +68,7 @@ namespace Bobery.Rover
 
             var shell = go.AddComponent<CannonShell>();
             shell._target = target;
+            shell._def = def;
             shell._end = from + dir * best;
             shell._normal = normal;
             shell._speed = Mathf.Max(1f, def.projectileSpeed);
@@ -88,7 +90,7 @@ namespace Bobery.Rover
             if (_target && !_target.IsDead)
             {
                 RoverTurret.LastHitTime = Time.time;
-                _target.TakeDamage(_damage, _end);
+                _target.TakeDamage(_damage, _end, _def);
                 WeaponFx.Sparks(_end, _normal, _fx * 0.8f);
             }
             else if (_solid) WeaponFx.Dust(_end, _normal, _fx * 0.8f);

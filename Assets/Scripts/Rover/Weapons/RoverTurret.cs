@@ -339,7 +339,7 @@ namespace Bobery.Rover
             if (_rebuild) Rebuild();
 
             bool inside = RoverInterior.IsInside || RoverInterior.IsTransitioning;
-            bool blocked = inside || GameOverScreen.IsShown || TutorialTips.IsOpen || Time.timeScale <= 0f;
+            bool blocked = inside || GameOverScreen.IsShown || TutorialTips.IsOpen || Time.timeScale <= 0f || BossFight.InCutscene;
             var cam = Camera.main;
             var mouse = Mouse.current;
             Vector2 sp = mouse != null ? mouse.position.ReadValue() : Vector2.zero;
@@ -620,7 +620,7 @@ namespace Bobery.Rover
             {
                 foreach (var h in CombatHealth.All)
                 {
-                    if (!h || h.IsDead) continue;
+                    if (!h || h.IsDead || !h.ShowsHealthBar) continue;
                     bool recent = Time.time - h.LastHitTime < 5f;
                     if (h.Fraction >= 0.999f && !recent) continue;
                     if (Vector3.Distance(cam.transform.position, h.transform.position) > healthBarRange) continue;
