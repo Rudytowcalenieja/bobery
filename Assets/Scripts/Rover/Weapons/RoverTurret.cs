@@ -51,6 +51,10 @@ namespace Bobery.Rover
         static readonly RaycastHit[] _hits = new RaycastHit[16];
         public static float LastHitTime = -100f, LastKillTime = -100f;
 
+        /// <summary>Scripted aim (trailer recording): when set and returning a value, it replaces the mouse
+        /// (screen point + trigger held) for guns.</summary>
+        public static System.Func<(Vector2 screen, bool fire)?> AimOverride;
+
         void Awake()
         {
             _fit = GetComponent<RoverAutoFit>();
@@ -343,7 +347,9 @@ namespace Bobery.Rover
             var cam = Camera.main;
             var mouse = Mouse.current;
             Vector2 sp = mouse != null ? mouse.position.ReadValue() : Vector2.zero;
-            bool inView = !blocked && cam && mouse != null && cam.pixelRect.Contains(sp) && !RoverHatch.PointerOver;
+            var scripted = AimOverride?.Invoke();
+            if (scripted.HasValue) sp = scripted.Value.screen;
+            bool inView = !blocked && cam && mouse != null && cam.pixelRect.Contains(sp) && (scripted.HasValue || !RoverHatch.PointerOver);
 
             bool rocket = _def != null && _def.kind == WeaponKind.RocketStrike;
             if (rocket) UpdateRocket(cam, sp, inView, mouse);
@@ -353,7 +359,7 @@ namespace Bobery.Rover
             IsFiring = false;
             _sinceShot += Time.deltaTime;
             if (_cooldown > 0f) _cooldown -= Time.deltaTime;
-            bool held = inView && mouse.leftButton.isPressed;
+            bool held = inView && (scripted.HasValue ? scripted.Value.fire : mouse.leftButton.isPressed);
             if (_def != null && _muzzle && held)
             {
                 IsFiring = true;
