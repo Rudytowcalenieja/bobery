@@ -33,6 +33,8 @@ namespace Bobery.Rover
         Camera _cam;
         FuelTank _tank;
         Transform _tankRoot;
+        /// <summary>The fuel tank in the cabin.</summary>
+        public Transform Tank => _tankRoot;
         Renderer _levelRenderer;
         MaterialPropertyBlock _mpb;
         Color _levelEmission;
@@ -135,13 +137,13 @@ namespace Bobery.Rover
             if (popup)
             {
                 PointerOverUi = _popupButtons.Update();
-                if (kb != null && kb.eKey.wasPressedThisFrame) Open();
+                if (kb != null && kb.eKey.wasPressedThisFrame && !TutorialTips.IsOpen) Open();
             }
-            else if (IsOpen && kb != null && kb.eKey.wasPressedThisFrame) Close();
+            else if (IsOpen && kb != null && kb.eKey.wasPressedThisFrame && !TutorialTips.IsOpen) Close();
 
             // Pump: held → spins up to full flow; released → winds down.
             bool held = false;
-            if (IsOpen)
+            if (IsOpen && !TutorialTips.IsOpen)
             {
                 PointerOverUi = RectTransformUtility.RectangleContainsScreenPoint(_panel, sp, null) | _panelButtons.Update();
                 bool overPump = RectTransformUtility.RectangleContainsScreenPoint(_pumpBtn, sp, null);
@@ -176,7 +178,7 @@ namespace Bobery.Rover
         {
             var crew = _repairs ? _repairs.Crew : null;
             var mouse = Mouse.current;
-            if (!crew || !_cam || !_tankRoot || mouse == null || IsOpen || PointerOverUi || GameOverScreen.IsShown) return;
+            if (!crew || !_cam || !_tankRoot || mouse == null || IsOpen || PointerOverUi || GameOverScreen.IsShown || TutorialTips.IsOpen) return;
             if (!mouse.leftButton.wasPressedThisFrame) return;
             Vector2 sp = mouse.position.ReadValue();
             if (!_cam.pixelRect.Contains(sp) || sp.x < 400f * (_canvas ? _canvas.scaleFactor : 1f)) return;

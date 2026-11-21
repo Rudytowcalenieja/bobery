@@ -29,6 +29,8 @@ namespace Bobery.Rover
         InteriorRepairs _repairs;
         Camera _cam;
         Transform _cabin, _dashboard;
+        /// <summary>The gunner's (right-hand) seat.</summary>
+        public Transform Seat => _dashboard;
         Canvas _canvas;
         RectTransform _root;
 
@@ -118,9 +120,9 @@ namespace Bobery.Rover
             if (popup)
             {
                 PointerOverUi = _popupButtons.Update();
-                if (kb != null && kb.eKey.wasPressedThisFrame) Open();
+                if (kb != null && kb.eKey.wasPressedThisFrame && !TutorialTips.IsOpen) Open();
             }
-            else if (IsOpen && kb != null && kb.eKey.wasPressedThisFrame && _dragId == null) Close();
+            else if (IsOpen && kb != null && kb.eKey.wasPressedThisFrame && _dragId == null && !TutorialTips.IsOpen) Close();
 
             // Menu
             _menuT = Mathf.MoveTowards(_menuT, IsOpen ? 1f : 0f, Time.unscaledDeltaTime / 0.18f);
@@ -131,7 +133,7 @@ namespace Bobery.Rover
             {
                 PointerOverUi = true; // the whole view is the menu while it's open
                 _menuButtons.Update();
-                UpdateDrag(mouse, sp);
+                if (!TutorialTips.IsOpen) UpdateDrag(mouse, sp);
                 UpdateDetails(sp);
             }
             else if (_ghost && !_returning) CancelDrag();
@@ -145,7 +147,7 @@ namespace Bobery.Rover
         {
             var crew = _repairs ? _repairs.Crew : null;
             var mouse = Mouse.current;
-            if (!crew || !_cam || !_dashboard || mouse == null || IsOpen || PointerOverUi || GameOverScreen.IsShown) return;
+            if (!crew || !_cam || !_dashboard || mouse == null || IsOpen || PointerOverUi || GameOverScreen.IsShown || TutorialTips.IsOpen) return;
             if (!mouse.leftButton.wasPressedThisFrame) return;
             Vector2 sp = mouse.position.ReadValue();
             if (!_cam.pixelRect.Contains(sp) || sp.x < 400f * (_canvas ? _canvas.scaleFactor : 1f)) return;

@@ -339,7 +339,7 @@ namespace Bobery.Rover
             if (_rebuild) Rebuild();
 
             bool inside = RoverInterior.IsInside || RoverInterior.IsTransitioning;
-            bool blocked = inside || GameOverScreen.IsShown || Time.timeScale <= 0f;
+            bool blocked = inside || GameOverScreen.IsShown || TutorialTips.IsOpen || Time.timeScale <= 0f;
             var cam = Camera.main;
             var mouse = Mouse.current;
             Vector2 sp = mouse != null ? mouse.position.ReadValue() : Vector2.zero;

@@ -59,9 +59,19 @@ namespace Bobery.Rover
         // ================================================================ placement
 
         /// <summary>Gives an outpost its turrets (once): two free spots near the corners of the walls, gate side first.</summary>
+        /// <summary>True while at least one of the outpost's turrets is still standing.</summary>
+        public static bool AnyAlive(Bobery.Terrain.Outpost outpost)
+        {
+            foreach (var t in All)
+                if (t && t.Home == outpost && !(t.TryGetComponent<CombatHealth>(out var h) && h.IsDead)) return true;
+            return false;
+        }
+
         public static void Equip(Bobery.Terrain.Outpost outpost)
         {
             if (!outpost) return;
+            // Equipped once only: when every turret is destroyed the outpost stays empty (no fresh turrets).
+            if (OutpostProgress.IsKnown(outpost)) return;
             if (outpost.GetComponentInChildren<OutpostTurret>(true)) { OutpostProgress.Register(outpost); return; }
 
             float W = outpost.gate ? Mathf.Max(6f, -outpost.gate.localPosition.z - 1f) : Mathf.Max(8f, outpost.radius * 0.5f);

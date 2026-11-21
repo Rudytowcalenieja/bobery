@@ -18,6 +18,9 @@ namespace Bobery.Rover
         /// <summary>Mouse is over the popup: the turret shouldn't fire on this click.</summary>
         public static bool PointerOver { get; private set; }
 
+        /// <summary>The ENTER popup while it's on screen (tutorial arrow target), else null.</summary>
+        public static RectTransform VisiblePopup { get; private set; }
+
         RoverController _rover;
         Renderer _hatch;
         Canvas _canvas;
@@ -33,7 +36,7 @@ namespace Bobery.Rover
             Build();
         }
 
-        void OnDisable() => PointerOver = false;
+        void OnDisable() { PointerOver = false; VisiblePopup = null; }
 
         void OnDestroy()
         {
@@ -64,6 +67,7 @@ namespace Bobery.Rover
                 if (show) _popup.position = new Vector3(s.x, s.y, 0f);
             }
             _popup.gameObject.SetActive(show);
+            VisiblePopup = show ? _popup : null;
             if (!show) return;
 
             // Hovering anywhere on the popup (not just the button) keeps the click away from the gun.

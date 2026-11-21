@@ -104,6 +104,7 @@ namespace Bobery.Rover
         Image _stateDot, _toastBg, _progressFill;
         Image[] _pillEdges, _toastEdges;
         RectTransform _scaleBar, _toast;
+        RectTransform _fuelBlock, _batBlock, _hullBlock, _beaconBlock;
         TextMeshProUGUI _speedVal, _headingVal, _distVal, _etaVal;
         readonly List<Btn> _buttons = new List<Btn>();
         Font _font, _mono;
@@ -185,6 +186,25 @@ namespace Bobery.Rover
             public bool enabled = true;
         }
 
+        /// <summary>HUD parts the tutorial points at: map, fuel, battery, hull, engine, beacons, panel.</summary>
+        public RectTransform TutorialTarget(string id)
+        {
+            switch (id)
+            {
+                case "map": return _map;
+                case "fuel": return _fuelBlock;
+                case "battery": return _batBlock;
+                case "hull": return _hullBlock;
+                case "engine": return _engBlock && _engBlock.gameObject.activeInHierarchy ? _engBlock : null;
+                case "beacons": return _beaconBlock;
+                case "panel": return _panel;
+                default: return null;
+            }
+        }
+
+        /// <summary>Panel finished sliding in.</summary>
+        public bool IsOpenFully => _openT >= 1f;
+
         // ================================================================ lifecycle
 
         void Start()
@@ -227,6 +247,9 @@ namespace Bobery.Rover
 
             // Going inside: the "ENTER ROVER" popup over the hatch on the rover's roof.
             if (rover) gameObject.AddComponent<RoverHatch>().Init(rover);
+
+            // Tutorial tips, if the player asked for them in the main menu.
+            TutorialTips.Begin();
         }
 
         void OnDestroy()
@@ -423,7 +446,7 @@ namespace Bobery.Rover
         /// <summary>Hull gauge, just above the battery gauge.</summary>
         void BuildHullBlock(float inner)
         {
-            var block = NewRect("Hull", _panel);
+            var block = _hullBlock = NewRect("Hull", _panel);
             block.anchorMin = block.anchorMax = new Vector2(0, 0);
             block.pivot = new Vector2(0, 0);
             block.anchoredPosition = new Vector2(Pad, Pad + 56 + 70 + 8 + 34 + 8);
@@ -700,7 +723,7 @@ namespace Bobery.Rover
             int used = 0;
             foreach (var o in OutpostProgress.Unfinished)
             {
-                if (!o) continue;
+                if (!o || !OutpostTurret.AnyAlive(o)) continue; // every turret down: nothing left to lead to
                 while (_outpostArrows.Count <= used)
                 {
                     var rt = NewRect("OutpostArrow", _outpostRoot);
@@ -776,7 +799,7 @@ namespace Bobery.Rover
         /// <summary>Battery gauge, just above the fuel gauge.</summary>
         void BuildBatteryBlock(float inner)
         {
-            var block = NewRect("Battery", _panel);
+            var block = _batBlock = NewRect("Battery", _panel);
             block.anchorMin = block.anchorMax = new Vector2(0, 0);
             block.pivot = new Vector2(0, 0);
             block.anchoredPosition = new Vector2(Pad, Pad + 56 + 70 + 8);
@@ -863,6 +886,8 @@ namespace Bobery.Rover
         void BuildBeaconBlock(float y, float inner)
         {
             Section("BEACONS", y, inner);
+            _beaconBlock = NewRect("BeaconArea", _panel); // invisible, just the block's bounds (tutorial arrow target)
+            TopLeft(_beaconBlock, Pad, y, inner, 26 + 44);
             _beaconCount = Label(_panel, "", 12, FontStyle.Bold, Dim, _mono);
             TopLeft(_beaconCount.rectTransform, Pad, y, inner, 16);
             _beaconCount.alignment = TextAlignmentOptions.TopRight;
@@ -1163,7 +1188,7 @@ namespace Bobery.Rover
         /// <summary>Fuel gauge pinned to the bottom-left of the panel, just above the key hints.</summary>
         void BuildFuelBlock(float inner)
         {
-            var block = NewRect("Fuel", _panel);
+            var block = _fuelBlock = NewRect("Fuel", _panel);
             block.anchorMin = new Vector2(0, 0); block.anchorMax = new Vector2(0, 0);
             block.pivot = new Vector2(0, 0);
             block.anchoredPosition = new Vector2(Pad, Pad + 56);
@@ -1430,7 +1455,7 @@ namespace Bobery.Rover
 
         void HandleInput()
         {
-            if (GameOverScreen.IsShown) return;
+            if (GameOverScreen.IsShown || TutorialTips.IsOpen) return;
             if (IsCasting)
             {
                 // Busy deploying a beacon: no orders until it's down.

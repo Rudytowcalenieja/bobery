@@ -33,6 +33,8 @@ namespace Bobery.Rover
         }
 
         public static bool IsCompleted(Bobery.Terrain.Outpost o) => o && _completed.Contains(o);
+        /// <summary>Already equipped with turrets (and tracked), finished or not.</summary>
+        public static bool IsKnown(Bobery.Terrain.Outpost o) => o && _known.Contains(o);
 
         /// <summary>Called for every outpost that has turrets (see <see cref="OutpostTurret.Equip"/>).</summary>
         public static void Register(Bobery.Terrain.Outpost o)
