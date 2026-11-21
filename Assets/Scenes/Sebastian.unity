@@ -905,6 +905,7 @@ GameObject:
   m_Component:
   - component: {fileID: 1520384002}
   - component: {fileID: 1520384003}
+  - component: {fileID: 1520384004}
   m_Layer: 0
   m_Name: Procedural Terrain
   m_TagString: Untagged
@@ -941,8 +942,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 0be7337c7c5d45c3b687c65c0c0bbd4a, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  mapSize: 240
-  resolution: 241
+  mapSize: 600
+  resolution: 513
   seed: 1337
   randomSeedOnPlay: 0
   baseHeight: 1.5
@@ -953,21 +954,61 @@ MonoBehaviour:
   lacunarity: 2.1
   hillSharpness: 1.3
   detailHeight: 0.18
-  lakeCount: 2
+  lakeCount: 6
   lakeRadius: {x: 7, y: 12}
   lakeDepth: 2
   shoreNoise: 0.35
   lakeEdgeMargin: 25
-  craterCount: 14
+  craterCount: 60
   craterRadius: {x: 4, y: 14}
   craterDepth: 0.25
   craterRim: 0.08
   craterMinAboveWater: 0.3
+  keepClearOf:
+  - {fileID: 146077542}
+  keepClearRadius: 60
   waterLevel: 0
   generateWater: 1
   terrainMaterial: {fileID: 2100000, guid: f4cd5af272b84083a6fa79fcc80de35d, type: 2}
   waterMaterial: {fileID: 2100000, guid: a0f3af0cc2c243f6b4324beb76250bb2, type: 2}
   generateCollider: 1
+--- !u!114 &1520384004
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1520384001}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 4911a44ce45f4fb4a4faf73b0fd2331c, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  style: 0
+  outpostCount: 5
+  padRadius: 20
+  padBlend: 12
+  minSpacing: 110
+  edgeMargin: 40
+  maxPadHeightDifference: 2.5
+  wallHalfSize: 15
+  wallDamage: 0.22
+  buildWatchtower: 1
+  propCount: 14
+  spawnPointsPerOutpost: 6
+  panelMaterial: {fileID: 2100000, guid: 316d5db310b94981b2fb64e3655a3be9, type: 2}
+  trimMaterial: {fileID: 2100000, guid: 6c7b0ab3a6164e63884f83edb5c091e8, type: 2}
+  glowMaterial: {fileID: 2100000, guid: e149c63e34e3427f9e167f9c65493300, type: 2}
+  accentMaterial: {fileID: 2100000, guid: e5e0eefe0377473c9e9910982aafad2e, type: 2}
+  glassMaterial: {fileID: 2100000, guid: a038cceee7744f9380cab66b0bb2c672, type: 2}
+  energyFieldMaterial: {fileID: 2100000, guid: 0f41300d27d647d685e8c73ebeddf2ca, type: 2}
+  concreteMaterial: {fileID: 2100000, guid: fa03d2b759e04e28aa8e0df13d040972, type: 2}
+  metalMaterial: {fileID: 2100000, guid: ee9babbe02f14523b722d17f98a4dfd4, type: 2}
+  rustMaterial: {fileID: 2100000, guid: 565ad37e30034a34bc56c2d986b02a4b, type: 2}
+  woodMaterial: {fileID: 2100000, guid: 37e3026a00e040289a0c4661dc1ff929, type: 2}
+  clothMaterial: {fileID: 2100000, guid: c7e2716a5df64cc4880fea23f05dbb45, type: 2}
+  sandbagMaterial: {fileID: 2100000, guid: d67fd439e6be4d24b4bdecd47cf20e88, type: 2}
+  addColliders: 1
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

@@ -81,8 +81,16 @@ namespace Bobery.Rover
 
         // ================================================================ grid build
 
+        /// <summary>Build the grid once and reuse it (much cheaper for frequent requests, e.g. enemies).
+        /// Call <see cref="Invalidate"/> if the terrain changes.</summary>
+        public bool cacheGrid;
+        bool _built;
+        public void Invalidate() => _built = false;
+
         void Build()
         {
+            if (cacheGrid && _built && _n > 0) return;
+            _built = true;
             if (!_terrain) _terrain = Object.FindAnyObjectByType<Bobery.Terrain.TerrainGenerator>();
 
             float size;
@@ -134,6 +142,12 @@ namespace Bobery.Rover
                     float hx = Mathf.Abs(H(x + 1, z) - H(x - 1, z)) * 0.5f;
                     float hz = Mathf.Abs(H(x, z + 1) - H(x, z - 1)) * 0.5f;
                     b = Mathf.Max(hx, hz) > maxRise;
+                }
+                if (!b && _terrain)
+                {
+                    // Outpost walls, buildings and props.
+                    Vector3 l = _terrain.transform.InverseTransformPoint(_origin + new Vector3(x * _cell, 0f, z * _cell));
+                    b = _terrain.IsObstacle(l.x, l.z, _cell * 0.5f);
                 }
                 raw[i] = b;
             }

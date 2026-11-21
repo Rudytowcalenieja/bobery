@@ -183,6 +183,12 @@ namespace Bobery.Rover
 
             // Battery: powers the map and weapons, recharged only by beacons.
             if (!GetComponent<RoverBattery>()) gameObject.AddComponent<RoverBattery>();
+
+            // Hull: enemy shots damage it, leaks are repaired from the inside.
+            if (!GetComponent<RoverHealth>()) gameObject.AddComponent<RoverHealth>();
+
+            // Enemies hunting the rover and its beacons.
+            if (!GetComponent<EnemySpawner>()) gameObject.AddComponent<EnemySpawner>();
         }
 
         void Update()

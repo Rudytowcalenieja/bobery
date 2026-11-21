@@ -26,7 +26,46 @@ namespace Bobery.Rover
         [Tooltip("Glowing fuel level bar. Its size/position in the scene = a FULL tank; it shrinks from the bottom as fuel drops.")]
         public Transform fuelLevel;
 
+        [Header("Repairs")]
+        [Tooltip("Crew member model (Assets/Models/player-walking.fbx). Empty → a capsule stand-in.")]
+        public GameObject crewModel;
+        [Tooltip("Walk animation (from player-walking.fbx).")]
+        public AnimationClip crewWalkClip;
+        [Tooltip("Repair animation (from player-DIY.fbx).")]
+        public AnimationClip crewRepairClip;
+        public const string CrewWalkPath = "Assets/Models/player-walking.fbx";
+        public const string CrewRepairPath = "Assets/Models/player-DIY.fbx";
+
+#if UNITY_EDITOR
+        void Reset() => FindCrewAssets();
+        void OnValidate() => FindCrewAssets();
+        /// <summary>Fills in the crew model and clips from Assets/Models if they're empty.</summary>
+        void FindCrewAssets()
+        {
+            bool changed = false;
+            if (!crewModel) { crewModel = UnityEditor.AssetDatabase.LoadAssetAtPath<GameObject>(CrewWalkPath); changed |= (bool)crewModel; }
+            if (!crewWalkClip) { crewWalkClip = FirstClip(CrewWalkPath); changed |= (bool)crewWalkClip; }
+            if (!crewRepairClip) { crewRepairClip = FirstClip(CrewRepairPath); changed |= (bool)crewRepairClip; }
+            if (changed && !Application.isPlaying && gameObject.scene.IsValid())
+                UnityEditor.EditorApplication.delayCall += () =>
+                {
+                    if (this) UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(gameObject.scene);
+                };
+        }
+
+        static AnimationClip FirstClip(string path)
+        {
+            foreach (var o in UnityEditor.AssetDatabase.LoadAllAssetsAtPath(path))
+                if (o is AnimationClip c && !c.name.StartsWith("__preview__")) return c;
+            return null;
+        }
+#endif
+
         FuelTank _tank;
+        RoverHealth _health;
+        InteriorRepairs _repairs;
+        Vector3 _camBasePos;
+        float _shake;
         Camera _cam;
         Quaternion _camBaseRot;
         Canvas _canvasScaler;
@@ -40,6 +79,8 @@ namespace Bobery.Rover
         TextMeshProUGUI _gaugeText, _reserveText, _statusText, _toastText;
         RectTransform _toast;
         float _toastTimer;
+        RectTransform _hullTrack, _hullFill, _cursorHint;
+        TextMeshProUGUI _hullText, _hullStatus, _cursorHintText;
 
         // Inventory
         readonly UIButtons _invButtons = new UIButtons();
@@ -62,6 +103,10 @@ namespace Bobery.Rover
         {
             var rover = FindAnyObjectByType<RoverController>();
             if (rover) _tank = rover.GetComponent<FuelTank>();
+            if (rover) _health = rover.GetComponent<RoverHealth>();
+#if UNITY_EDITOR
+            FindCrewAssets();
+#endif
 
             if (!interiorCamera)
             {
@@ -70,7 +115,7 @@ namespace Bobery.Rover
                 fuelLevel = built.level;
             }
             _cam = interiorCamera;
-            if (_cam) _camBaseRot = _cam.transform.localRotation;
+            if (_cam) { _camBaseRot = _cam.transform.localRotation; _camBasePos = _cam.transform.localPosition; }
             _fuelLevel = fuelLevel;
             if (_fuelLevel)
             {
@@ -84,9 +129,33 @@ namespace Bobery.Rover
             PlayerInventory.Changed += RebuildSlots;
             RebuildSlots();
             SetInventoryOpen(false, instant: true);
+
+            // Leaks on the walls + the crew member who patches them.
+            _repairs = gameObject.AddComponent<InteriorRepairs>();
+            var cabin = _cam && _cam.transform.parent ? _cam.transform.parent : transform.Find("Cabin");
+            _repairs.Init(_health, _cam, cabin, crewModel, crewWalkClip, crewRepairClip, () => _invOpen || PointerOverHud());
+            if (_health) _health.Damaged += OnHullHit;
         }
 
-        void OnDestroy() => PlayerInventory.Changed -= RebuildSlots;
+        void OnDestroy()
+        {
+            PlayerInventory.Changed -= RebuildSlots;
+            if (_health) _health.Damaged -= OnHullHit;
+        }
+
+        void OnHullHit(RoverHealth.Leak leak)
+        {
+            _shake = 0.5f;
+            Toast("HULL BREACH! Click the leak to repair it");
+        }
+
+        /// <summary>Mouse over the side panel (the 3D view starts right of it).</summary>
+        bool PointerOverHud()
+        {
+            var m = Mouse.current;
+            if (m == null || !_canvasScaler) return false;
+            return m.position.ReadValue().x < 400f * _canvasScaler.scaleFactor;
+        }
 
         // ================================================================ room (placeholder geometry)
 
@@ -251,13 +320,24 @@ namespace Bobery.Rover
             RoverUI.TopLeft(_statusText.rectTransform, pad, y, inner, 44);
             y += 60;
 
+            var hl = RoverUI.Label(side, "ROVER_HULL", 13, FontStyle.Bold, RoverUI.Accent);
+            RoverUI.TopLeft(hl.rectTransform, pad, y, inner, 16);
+            _hullText = RoverUI.Label(side, "", 12, FontStyle.Bold, RoverUI.White, mono: true);
+            RoverUI.TopLeft(_hullText.rectTransform, pad, y, inner, 16);
+            _hullText.alignment = TextAlignmentOptions.TopRight;
+            _hullTrack = RoverUI.Bar(side, pad, y + 24, inner, 10, out _hullFill);
+            y += 50;
+            _hullStatus = RoverUI.Label(side, "", 14, FontStyle.Bold, RoverUI.White);
+            RoverUI.TopLeft(_hullStatus.rectTransform, pad, y, inner, 44);
+            y += 60;
+
             _hudButtons.Add(side, "INVENTORY  [ I ]", pad, y, inner, 46, true, () => SetInventoryOpen(!_invOpen));
             y += 56;
             _hudButtons.Add(side, "LEAVE ROVER  [ ESC ]", pad, y, inner, 46, false, Leave);
 
             // Footer key hints
             string acc = RoverUI.Hex(RoverUI.Accent);
-            var hint = RoverUI.Label(side, $"<color={acc}><b>[I]</b></color> Inventory    <color={acc}><b>[ESC]</b></color> Leave / close", 12, FontStyle.Normal, RoverUI.Dim, mono: true);
+            var hint = RoverUI.Label(side, $"<color={acc}><b>[LMB]</b></color> Repair / walk   <color={acc}><b>[I]</b></color> Inventory   <color={acc}><b>[ESC]</b></color> Leave", 12, FontStyle.Normal, RoverUI.Dim, mono: true);
             hint.rectTransform.anchorMin = new Vector2(0, 0); hint.rectTransform.anchorMax = new Vector2(1, 0);
             hint.rectTransform.pivot = new Vector2(0, 0);
             hint.rectTransform.offsetMin = new Vector2(pad, pad); hint.rectTransform.offsetMax = new Vector2(-pad, pad + 20);
@@ -274,6 +354,18 @@ namespace Bobery.Rover
             RoverUI.Stretch(_toastText.rectTransform);
             _toastText.alignment = TextAlignmentOptions.Center;
             _toast.gameObject.SetActive(false);
+
+            // Hint next to the cursor over a leak / repair progress over the crew.
+            _cursorHint = RoverUI.Rect("CursorHint", root);
+            _cursorHint.anchorMin = _cursorHint.anchorMax = Vector2.zero;
+            _cursorHint.pivot = new Vector2(0, 0.5f);
+            _cursorHint.sizeDelta = new Vector2(190, 26);
+            RoverUI.Img(_cursorHint, RoverUI.Black);
+            RoverUI.Outline(_cursorHint, RoverUI.Red);
+            _cursorHintText = RoverUI.Label(_cursorHint, "", 12, FontStyle.Bold, RoverUI.Red, mono: true);
+            RoverUI.Stretch(_cursorHintText.rectTransform);
+            _cursorHintText.alignment = TextAlignmentOptions.Center;
+            _cursorHint.gameObject.SetActive(false);
 
             // Inventory lives on the same canvas, above everything.
             _inv = RoverUI.Rect("Inventory", root);
@@ -445,6 +537,7 @@ namespace Bobery.Rover
             _inv.gameObject.SetActive(_invT > 0.001f);
 
             UpdateGauges();
+            UpdateHull();
             AnimateRoom();
 
             if (_toastTimer > 0f)
@@ -475,6 +568,43 @@ namespace Bobery.Rover
             if (_invOpen) UpdateDetails();
         }
 
+        void UpdateHull()
+        {
+            if (!_hullTrack) return;
+            if (!_health)
+            {
+                _hullText.text = "NO ROVER";
+                RoverUI.SetBar(_hullTrack, _hullFill, 0f);
+                _hullStatus.text = "";
+            }
+            else
+            {
+                int leaks = _health.Leaks.Count;
+                float drain = _health.LeakRate / _health.maxHealth * 100f;
+                _hullText.text = $"{_health.Fraction * 100f:0}%" + (leaks > 0 ? $"  -{drain:0.#}%/s  ·  {leaks} LEAK{(leaks == 1 ? "" : "S")}" : "");
+                RoverUI.SetBar(_hullTrack, _hullFill, _health.Fraction);
+                bool hit = _health.SinceHit < 0.6f;
+                _hullFill.GetComponent<Image>().color = hit ? RoverUI.White : _health.IsLow ? RoverUI.Red : leaks > 0 ? RoverUI.Yellow : RoverUI.Accent;
+                if (_repairs && _repairs.Repairing)
+                    _hullStatus.text = Tag("FIX ", RoverUI.Accent, $"Patching a leak... {_repairs.RepairProgress * 100f:0}%");
+                else if (_health.IsLow) _hullStatus.text = Tag("ERR ", RoverUI.Red, "Hull critical! Click the leaks on the walls to repair.");
+                else if (leaks > 0) _hullStatus.text = Tag("WARN", RoverUI.Yellow, "Hull leaking. Click a leak to send the crew.");
+                else _hullStatus.text = Tag("OKAY", RoverUI.Green, "Hull intact.");
+            }
+
+            // Cursor hint over a leak.
+            var m = Mouse.current;
+            bool show = _repairs && _repairs.Hovered && m != null && !_invOpen;
+            _cursorHint.gameObject.SetActive(show);
+            if (show)
+            {
+                bool busy = _repairs.Repairing == _repairs.Hovered;
+                _cursorHintText.text = busy ? $"REPAIRING {_repairs.RepairProgress * 100f:0}%" : "[LMB] REPAIR LEAK";
+                float s = _canvasScaler ? _canvasScaler.scaleFactor : 1f;
+                _cursorHint.anchoredPosition = m.position.ReadValue() / s + new Vector2(18, -18);
+            }
+        }
+
         static string Tag(string tag, Color c, string msg) => $"<color={RoverUI.Hex(c)}>[{tag}]</color> {msg}";
 
         void AnimateRoom()
@@ -502,6 +632,9 @@ namespace Bobery.Rover
                 Vector2 n = new Vector2(p.x / Mathf.Max(1, Screen.width) - 0.5f, p.y / Mathf.Max(1, Screen.height) - 0.5f);
                 var target = _camBaseRot * Quaternion.Euler(-n.y * 6f, n.x * 10f, 0f);
                 _cam.transform.localRotation = Quaternion.Slerp(_cam.transform.localRotation, target, 1f - Mathf.Exp(-4f * Time.deltaTime));
+                // Shake when the hull takes a hit.
+                _shake = Mathf.Max(0f, _shake - Time.deltaTime);
+                _cam.transform.localPosition = _camBasePos + Random.insideUnitSphere * (0.08f * _shake * _shake * 4f);
             }
         }
 

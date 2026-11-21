@@ -61,6 +61,10 @@ namespace Bobery.Rover
         [Min(0f)] public float beaconCooldown = 300f;
         [Tooltip("Seconds it takes to pick a beacon up; the rover must stay in its zone meanwhile (0 = instant).")]
         [Min(0f)] public float beaconPickUpTime = 10f;
+        [Tooltip("Enemy shots a beacon survives.")]
+        [Min(1)] public int beaconHits = 5;
+        [Tooltip("Seconds the rover is busy deploying a beacon: it stops and no other order can be given.")]
+        [Min(0f)] public float beaconCastTime = 3f;
         [Tooltip("3D model for placed beacons (Assets/Models/beacon.fbx). Empty → a primitive stand-in.")]
         public GameObject beaconModel;
 
@@ -142,6 +146,23 @@ namespace Bobery.Rover
         float _destroyConfirm;
         Sprite _ringSprite, _discSprite, _glyphSprite;
 
+        // ---- beacon cast (deploying)
+        float _castLeft;
+        Vector3 _castPoint;
+        RectTransform _castBar, _castFill;
+        TextMeshProUGUI _castText;
+        public bool IsCasting => _castLeft > 0f;
+
+        // ---- hull
+        RoverHealth _health;
+        RectTransform _hullTrack, _hullFill;
+        Image _hullFillImg;
+        TextMeshProUGUI _hullValue, _hullLabel;
+
+        // ---- enemies
+        RectTransform _enemyRoot;
+        readonly List<Image> _enemyMarks = new List<Image>();
+
         // ---- state
         string _lastState = "";
         float _toastTimer;
@@ -181,6 +202,8 @@ namespace Bobery.Rover
 #endif
             BeaconNetwork.Model = beaconModel;
             BeaconNetwork.PickUpTime = beaconPickUpTime;
+            BeaconNetwork.MaxHits = beaconHits;
+            BeaconNetwork.CastTime = beaconCastTime;
             BeaconNetwork.Configure(beaconCount, beaconFuelCostPercent / 100f, beaconBatteryCostPercent / 100f,beaconRadius, beaconChargePerSecond, beaconCooldown);
 
             BuildMapCamera();
@@ -193,6 +216,7 @@ namespace Bobery.Rover
             if (_tank) _tank.RanOut += OnRanOut;
             if (rover) _battery = rover.GetComponent<RoverBattery>();
             if (_battery) { _battery.RanOut += OnBatteryOut; _battery.Restored += OnBatteryRestored; }
+            if (rover) _health = rover.GetComponent<RoverHealth>();
             RoverHud.Notified += Toast;
         }
 
@@ -382,6 +406,179 @@ namespace Bobery.Rover
 
             BuildFuelBlock(inner);
             BuildBatteryBlock(inner);
+            BuildHullBlock(inner);
+            BuildCastBar(canvasGo.transform);
+        }
+
+        // ================================================================ hull
+
+        /// <summary>Hull gauge, just above the battery gauge.</summary>
+        void BuildHullBlock(float inner)
+        {
+            var block = NewRect("Hull", _panel);
+            block.anchorMin = block.anchorMax = new Vector2(0, 0);
+            block.pivot = new Vector2(0, 0);
+            block.anchoredPosition = new Vector2(Pad, Pad + 56 + 70 + 12 + 34 + 12);
+            block.sizeDelta = new Vector2(inner, 34);
+
+            _hullLabel = Label(block, "HULL", 12, FontStyle.Bold, Dim);
+            TopLeft(_hullLabel.rectTransform, 0, 0, inner, 16);
+            _hullValue = Label(block, "", 13, FontStyle.Bold, White, _mono);
+            TopLeft(_hullValue.rectTransform, 0, -2, inner, 18);
+            _hullValue.alignment = TextAlignmentOptions.TopRight;
+
+            _hullTrack = NewRect("Track", block);
+            TopLeft(_hullTrack, 0, 22, inner, 10);
+            Img(_hullTrack, Ghost);
+            Outline(_hullTrack, Faint, 1);
+            for (int i = 1; i < 10; i++) // one segment per hit
+            {
+                var t = NewRect("Cell", _hullTrack);
+                t.anchorMin = t.anchorMax = new Vector2(i / 10f, 0.5f);
+                t.sizeDelta = new Vector2(2, 10);
+                Img(t, Black);
+            }
+            _hullFill = NewRect("Fill", _hullTrack);
+            _hullFill.anchorMin = new Vector2(0, 0); _hullFill.anchorMax = new Vector2(0, 1);
+            _hullFill.pivot = new Vector2(0, 0.5f);
+            _hullFill.offsetMin = new Vector2(2, 2); _hullFill.offsetMax = new Vector2(2, -2);
+            _hullFillImg = Img(_hullFill, Accent);
+            _hullFill.SetAsFirstSibling();
+        }
+
+        void UpdateHull()
+        {
+            if (!_hullTrack) return;
+            if (!_health) { _hullValue.text = "—"; return; }
+            float w = _hullTrack.rect.width - 4f;
+            _hullFill.sizeDelta = new Vector2(w * _health.Fraction, _hullFill.sizeDelta.y);
+            int leaks = _health.Leaks.Count;
+            string pct = $"{_health.Fraction * 100f:0}%";
+            float drain = _health.LeakRate / _health.maxHealth * 100f;
+            _hullValue.text = leaks > 0 ? $"{pct}  -{drain:0.#}%/s  {leaks} LEAK{(leaks == 1 ? "" : "S")}" : pct;
+
+            bool hit = _health.SinceHit < 0.6f;
+            float blink = 0.5f + 0.5f * Mathf.Sin(Time.time * 8f);
+            _hullFillImg.color = hit ? White
+                               : _health.IsLow ? A(Red, Mathf.Lerp(0.35f, 1f, blink))
+                               : _health.Fraction < 0.7f ? Yellow : Accent;
+            _hullLabel.text = _health.IsDestroyed ? "HULL [ERR ] DESTROYED"
+                            : _health.IsLow ? "HULL [WARN] CRITICAL"
+                            : leaks > 0 ? "HULL [WARN] LEAKING" : "HULL";
+            _hullLabel.color = _health.IsLow || hit ? Red : leaks > 0 ? Yellow : Dim;
+        }
+
+        // ================================================================ beacon cast
+
+        const float CastBarWidth = 420f;
+
+        /// <summary>Progress bar centred under the 3D view while a beacon is being deployed.</summary>
+        void BuildCastBar(Transform canvas)
+        {
+            _castBar = NewRect("BeaconCast", canvas);
+            _castBar.anchorMin = _castBar.anchorMax = new Vector2(0.5f, 0);
+            _castBar.pivot = new Vector2(0.5f, 0);
+            _castBar.anchoredPosition = new Vector2(panelWidth * 0.5f, 120);
+            _castBar.sizeDelta = new Vector2(CastBarWidth, 64);
+            Img(_castBar, Black);
+            Outline(_castBar, Accent, 1);
+            _castText = Label(_castBar, "", 13, FontStyle.Bold, Accent, _mono);
+            TopLeft(_castText.rectTransform, 18, 12, CastBarWidth - 36, 18);
+            var track = NewRect("Track", _castBar);
+            TopLeft(track, 18, 38, CastBarWidth - 36, 10);
+            Img(track, Ghost);
+            Outline(track, Faint, 1);
+            _castFill = NewRect("Fill", track);
+            _castFill.anchorMin = new Vector2(0, 0); _castFill.anchorMax = new Vector2(0, 1);
+            _castFill.pivot = new Vector2(0, 0.5f);
+            _castFill.offsetMin = new Vector2(2, 2); _castFill.offsetMax = new Vector2(2, -2);
+            Img(_castFill, Accent);
+            _castFill.SetAsFirstSibling();
+            _castBar.gameObject.SetActive(false);
+        }
+
+        /// <summary>Starts deploying a beacon at <paramref name="point"/>: the rover stops and stays busy for the cast time.</summary>
+        void BeginCast(Vector3 point)
+        {
+            _placing = false;
+            _selected = null;
+            if (BeaconNetwork.CastTime <= 0f) { FinishCast(point); return; }
+            _castPoint = point;
+            _castLeft = BeaconNetwork.CastTime;
+            if (rover) rover.Stop();
+            Toast("Deploying beacon...");
+        }
+
+        void FinishCast(Vector3 point)
+        {
+            _castLeft = 0f;
+            if (!BeaconNetwork.TryPlace(point, out _, out string err)) { Toast(err); return; }
+            Toast($"Beacon inbound  ({BeaconNetwork.CostText})");
+        }
+
+        void UpdateCast()
+        {
+            if (!_castBar) return;
+            bool on = IsCasting;
+            if (_castBar.gameObject.activeSelf != on) _castBar.gameObject.SetActive(on);
+            if (!on) return;
+            if (GameOverScreen.IsShown) { _castLeft = 0f; return; }
+
+            _castLeft = Mathf.Max(0f, _castLeft - Time.deltaTime);
+            float total = Mathf.Max(0.01f, BeaconNetwork.CastTime);
+            float k = 1f - _castLeft / total;
+            string dots = new string('.', 1 + (int)(Time.time * 3f) % 3).PadRight(3);
+            _castText.text = $"> DEPLOYING BEACON{dots}  <color={RoverUI.Hex(White)}>{_castLeft:0.0}s</color>";
+            _castFill.sizeDelta = new Vector2((CastBarWidth - 40f) * k, _castFill.sizeDelta.y);
+            if (rover && rover.HasDestination) rover.Stop();
+
+            // Keep the drop zone shown on the map meanwhile, opening up as the cast completes.
+            if (_placeGhost && _map)
+            {
+                float pxPerM = Mathf.Abs(WorldToMapUnclamped(_castPoint + Vector3.right).x - WorldToMapUnclamped(_castPoint).x);
+                _placeGhost.gameObject.SetActive(true);
+                _placeGhost.anchoredPosition = WorldToMapUnclamped(_castPoint);
+                _placeGhost.sizeDelta = Vector2.one * (BeaconNetwork.Radius * pxPerM * 2f * Mathf.Lerp(0.3f, 1f, k));
+            }
+            if (_castLeft <= 0f) FinishCast(_castPoint);
+        }
+
+        // ================================================================ enemies
+
+        /// <summary>Red dots for enemies on the map (they pulse while shooting).</summary>
+        void UpdateEnemies()
+        {
+            if (!_map) return;
+            if (!_enemyRoot)
+            {
+                _enemyRoot = NewRect("Enemies", _map);
+                Stretch(_enemyRoot, 0);
+                _enemyRoot.SetSiblingIndex(_roverIcon.GetSiblingIndex()); // under the rover arrow
+            }
+            Rect r = _map.rect;
+            int shown = 0;
+            foreach (var e in EnemyRover.All)
+            {
+                if (!e) continue;
+                Vector2 p = WorldToMapUnclamped(e.transform.position);
+                if (Mathf.Abs(p.x) > r.width * 0.5f + 8f || Mathf.Abs(p.y) > r.height * 0.5f + 8f) continue;
+                while (_enemyMarks.Count <= shown)
+                {
+                    var rt = NewRect("Enemy", _enemyRoot);
+                    rt.sizeDelta = new Vector2(12, 12);
+                    var img = Img(rt, Red);
+                    img.sprite = Circle(32, 0.25f);
+                    img.raycastTarget = false;
+                    _enemyMarks.Add(img);
+                }
+                var m = _enemyMarks[shown++];
+                m.gameObject.SetActive(true);
+                m.rectTransform.anchoredPosition = p;
+                float pulse = e.IsFiring ? 0.5f + 0.5f * Mathf.Sin(Time.time * 10f) : 0f;
+                m.rectTransform.sizeDelta = Vector2.one * (11f + 4f * pulse);
+                m.color = A(Red, 0.75f + 0.25f * pulse);
+            }
+            for (int i = shown; i < _enemyMarks.Count; i++) _enemyMarks[i].gameObject.SetActive(false);
         }
 
         // ================================================================ battery
@@ -574,7 +771,7 @@ namespace Bobery.Rover
                 lr.anchorMin = lr.anchorMax = new Vector2(0.5f, 0.5f);
                 lr.pivot = new Vector2(0.5f, 1f);
                 lr.anchoredPosition = new Vector2(0, -11);
-                lr.sizeDelta = new Vector2(90, 14);
+                lr.sizeDelta = new Vector2(160, 14);
                 m.label.alignment = TextAlignmentOptions.Top;
                 RoverUI.Shadowed(m.label);
                 _beaconMarks.Add(m);
@@ -618,9 +815,15 @@ namespace Bobery.Rover
                                     : cool ? A(Yellow, 0.6f) : tint;
                     m.label.color = b.IsPickingUp ? Accent : cool ? Yellow : b.RoverInside && !sel ? Green : Accent;
                     string timer = b.IsPickingUp ? $"PICK-UP {Beacon.Clock(b.PickUpLeft)}" : cool ? Beacon.Clock(b.CooldownLeft) : "";
-                    m.label.text = b.IsPickingUp ? timer
+                    string text = b.IsPickingUp ? timer
                                  : sel ? (cool ? $"SELECTED · {timer}" : "SELECTED")
                                  : cool ? timer : b.RoverInside ? "CHARGING" : "";
+                    if (b.IsDamaged && b.IsActive)
+                    {
+                        string hp = $"<color={RoverUI.Hex(Red)}>HP {b.HitsLeft}/{b.maxHits}</color>";
+                        text = string.IsNullOrEmpty(text) ? hp : $"{hp} · {text}";
+                    }
+                    m.label.text = text;
                 }
             }
             for (int i = shown; i < _beaconMarks.Count; i++) _beaconMarks[i].rt.gameObject.SetActive(false);
@@ -1016,7 +1219,10 @@ namespace Bobery.Rover
             UpdateTelemetry();
             UpdateFuel();
             UpdateBattery();
+            UpdateHull();
             UpdateBeacons();
+            UpdateEnemies();
+            UpdateCast();
 
             // Slide-in on start.
             _openT = Mathf.Min(1f, _openT + Time.unscaledDeltaTime / 0.45f);
@@ -1033,6 +1239,14 @@ namespace Bobery.Rover
         void HandleInput()
         {
             if (GameOverScreen.IsShown) return;
+            if (IsCasting)
+            {
+                // Busy deploying a beacon: no orders until it's down.
+                _hoverIcon.gameObject.SetActive(false);
+                foreach (var b in _buttons)
+                    if (b.rt.gameObject.activeInHierarchy) UIButtons.Paint(b.bg, b.edges, b.label, b.filled, false, false, b.tone);
+                return;
+            }
             var kb = Keyboard.current;
             if (kb != null && kb.eKey.wasPressedThisFrame) { RoverInterior.Enter(); return; }
 
@@ -1113,9 +1327,9 @@ namespace Bobery.Rover
             {
                 if (!TryMapPoint(screen, out RaycastHit ph, out _)) { Toast("No ground there"); return; }
                 if (ph.point.y < _waterY - 0.05f) { Toast("Can't drop a beacon into water"); return; }
-                if (!BeaconNetwork.TryPlace(ph.point, out _, out string err)) { Toast(err); _placing = false; return; }
-                _placing = false;
-                Toast($"Beacon inbound  ({BeaconNetwork.CostText})");
+                if (BeaconNetwork.Available <= 0) { Toast("No beacons left"); _placing = false; return; }
+                if (!BeaconNetwork.CanAfford) { Toast(BeaconNetwork.CostProblem); _placing = false; return; }
+                BeginCast(ph.point);
                 return;
             }
             if (_hoverBeacon)
@@ -1321,8 +1535,9 @@ namespace Bobery.Rover
             _progressFill.rectTransform.sizeDelta = new Vector2((panelWidth - Pad * 2f) * prog, 0);
             _progressText.text = has ? $"{prog * 100f:0}%" : "—";
 
-            string state = _tank && _tank.IsEmpty ? "NO FUEL" : _battery && _battery.IsEmpty ? "NO POWER" : has ? (speed > 0.3f ? "EN ROUTE" : "TURNING") : "IDLE";
-            Color sc = state == "NO FUEL" || state == "NO POWER" ? Red : state == "EN ROUTE" ? Green : state == "TURNING" ? Yellow : Accent;
+            string state = IsCasting ? "DEPLOYING" : _health && _health.SinceHit < 2f ? "UNDER FIRE"
+                         : _tank && _tank.IsEmpty ? "NO FUEL" : _battery && _battery.IsEmpty ? "NO POWER" : has ? (speed > 0.3f ? "EN ROUTE" : "TURNING") : "IDLE";
+            Color sc = state == "NO FUEL" || state == "NO POWER" || state == "UNDER FIRE" ? Red : state == "EN ROUTE" ? Green : state == "TURNING" || state == "DEPLOYING" ? Yellow : Accent;
             if (state != _lastState) { _stateText.text = state; _lastState = state; }
             _stateText.color = sc;
             RoverUI.SetOutline(_pillEdges, sc);
