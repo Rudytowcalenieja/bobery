@@ -52,6 +52,8 @@ namespace Bobery.Rover
         RoverController _rover;
 
         const int TurretCount = 2;
+        /// <summary>Hit points of one turret (the rover's guns can destroy it).</summary>
+        public const float HitPoints = 100f;
         const float FootprintHalf = 1.3f;
 
         // ================================================================ placement
@@ -59,7 +61,8 @@ namespace Bobery.Rover
         /// <summary>Gives an outpost its turrets (once): two free spots near the corners of the walls, gate side first.</summary>
         public static void Equip(Bobery.Terrain.Outpost outpost)
         {
-            if (!outpost || outpost.GetComponentInChildren<OutpostTurret>(true)) return;
+            if (!outpost) return;
+            if (outpost.GetComponentInChildren<OutpostTurret>(true)) { OutpostProgress.Register(outpost); return; }
 
             float W = outpost.gate ? Mathf.Max(6f, -outpost.gate.localPosition.z - 1f) : Mathf.Max(8f, outpost.radius * 0.5f);
             // Every free spot on a 2 m grid inside the walls, best first: corners, then the gate side.
@@ -86,6 +89,7 @@ namespace Bobery.Rover
                 var t = go.AddComponent<OutpostTurret>();
                 t.Home = outpost;
                 t.Build();
+                go.AddComponent<CombatHealth>().Setup("Outpost turret", HitPoints, new Vector3(0f, 2.6f, 0f), 1.9f, 5.2f);
 
                 outpost.footprints.Add(new Bobery.Terrain.OutpostFootprint
                 {
@@ -94,6 +98,7 @@ namespace Bobery.Rover
                 });
                 placed++;
             }
+            if (placed > 0) OutpostProgress.Register(outpost); // completed once these turrets are destroyed
         }
 
         /// <summary>Lower is better: near a corner, and the gate (-Z) side a little ahead of the back.</summary>

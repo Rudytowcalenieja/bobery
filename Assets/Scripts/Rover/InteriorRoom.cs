@@ -66,6 +66,7 @@ namespace Bobery.Rover
         FuelTank _tank;
         RoverHealth _health;
         InteriorRepairs _repairs;
+        CockpitWeapons _weapons;
         Vector3 _camBasePos;
         float _shake;
         Camera _cam;
@@ -135,7 +136,12 @@ namespace Bobery.Rover
             // Leaks on the walls + the crew member who patches them.
             _repairs = gameObject.AddComponent<InteriorRepairs>();
             var cabin = _cam && _cam.transform.parent ? _cam.transform.parent : transform.Find("Cabin");
-            _repairs.Init(_health, _cam, cabin, crewModel, crewWalkClip, crewRepairClip, () => _invOpen || PointerOverHud(), crew);
+            _repairs.Init(_health, _cam, cabin, crewModel, crewWalkClip, crewRepairClip,
+                () => _invOpen || PointerOverHud() || (_weapons && _weapons.PointerOverUi), crew);
+
+            // Weapon swapping at the cockpit.
+            _weapons = gameObject.AddComponent<CockpitWeapons>();
+            _weapons.Init(_repairs, _cam, cabin);
             if (_health) _health.Damaged += OnHullHit;
         }
 
@@ -392,10 +398,11 @@ namespace Bobery.Rover
             var kb = Keyboard.current;
             if (kb != null && !GameOverScreen.IsShown)
             {
-                if (kb.iKey.wasPressedThisFrame) SetInventoryOpen(!_invOpen);
+                if (kb.iKey.wasPressedThisFrame && !(_weapons && _weapons.IsOpen)) SetInventoryOpen(!_invOpen);
                 if (kb.escapeKey.wasPressedThisFrame)
                 {
-                    if (_invOpen) SetInventoryOpen(false);
+                    if (_weapons && _weapons.IsOpen) _weapons.Close();
+                    else if (_invOpen) SetInventoryOpen(false);
                     else Leave();
                 }
             }
@@ -411,7 +418,7 @@ namespace Bobery.Rover
                         if (rt && RectTransformUtility.RectangleContainsScreenPoint(rt, sp, null)) { _selected = id; RebuildSlots(); break; }
                 }
             }
-            else _hudButtons.Update();
+            else if (!(_weapons && _weapons.IsOpen)) _hudButtons.Update();
 
             // Inventory fade/scale
             _invT = Mathf.MoveTowards(_invT, _invOpen ? 1f : 0f, Time.unscaledDeltaTime / 0.18f);

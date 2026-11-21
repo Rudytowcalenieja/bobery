@@ -285,6 +285,8 @@ namespace Bobery.Rover
         }
 
         public int LeakCount => _spots.Count;
+        /// <summary>The crew member walking around the cabin.</summary>
+        public RepairCrew Crew => _crew;
 
         // ================================================================ input
 
