@@ -178,6 +178,7 @@ GameObject:
   - component: {fileID: 40917515}
   - component: {fileID: 40917514}
   - component: {fileID: 40917513}
+  - component: {fileID: 40917516}
   m_Layer: 5
   m_Name: Panel
   m_TagString: Untagged
@@ -266,6 +267,19 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 40917511}
   m_CullTransparentMesh: 1
+--- !u!114 &40917516
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 40917511}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6f34bb3af99d94f4d9ff4da36e34bf3c, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::MoveAndDie
+  liveTime: 3.5
 --- !u!1 &52926512
 GameObject:
   m_ObjectHideFlags: 0
@@ -13047,6 +13061,7 @@ GameObject:
   - component: {fileID: 1993255233}
   - component: {fileID: 1993255235}
   - component: {fileID: 1993255234}
+  - component: {fileID: 1993255236}
   m_Layer: 5
   m_Name: Text (TMP)
   m_TagString: Untagged
@@ -13070,8 +13085,8 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: 0.89, y: -68.571}
-  m_SizeDelta: {x: 707.312, y: 137.14}
+  m_AnchoredPosition: {x: 0, y: -78.141}
+  m_SizeDelta: {x: 1041.488, y: 156.281}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &1993255234
 MonoBehaviour:
@@ -13173,6 +13188,28 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1993255232}
   m_CullTransparentMesh: 1
+--- !u!95 &1993255236
+Animator:
+  serializedVersion: 7
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1993255232}
+  m_Enabled: 1
+  m_Avatar: {fileID: 0}
+  m_Controller: {fileID: 9100000, guid: ce22c04db883c084eb98e89657f20a83, type: 2}
+  m_CullingMode: 0
+  m_UpdateMode: 0
+  m_ApplyRootMotion: 0
+  m_LinearVelocityBlending: 0
+  m_StabilizeFeet: 0
+  m_AnimatePhysics: 0
+  m_WarningMessage: 
+  m_HasTransformHierarchy: 1
+  m_AllowConstantClipSamplingOptimization: 1
+  m_KeepAnimatorStateOnDisable: 0
+  m_WriteDefaultValuesOnDisable: 0
 --- !u!1 &1996420629
 GameObject:
   m_ObjectHideFlags: 0
@@ -13321,6 +13358,7 @@ GameObject:
   - component: {fileID: 2038087216}
   - component: {fileID: 2038087218}
   - component: {fileID: 2038087217}
+  - component: {fileID: 2038087219}
   m_Layer: 5
   m_Name: Image
   m_TagString: Untagged
@@ -13360,7 +13398,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.Image
   m_Material: {fileID: 0}
-  m_Color: {r: 1, g: 1, b: 1, a: 1}
+  m_Color: {r: 1, g: 1, b: 1, a: 0}
   m_RaycastTarget: 1
   m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
   m_Maskable: 1
@@ -13385,6 +13423,28 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 2038087215}
   m_CullTransparentMesh: 1
+--- !u!95 &2038087219
+Animator:
+  serializedVersion: 7
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2038087215}
+  m_Enabled: 1
+  m_Avatar: {fileID: 0}
+  m_Controller: {fileID: 9100000, guid: 9c6ce38b94167bf4a8b1d187aaf58253, type: 2}
+  m_CullingMode: 0
+  m_UpdateMode: 0
+  m_ApplyRootMotion: 0
+  m_LinearVelocityBlending: 0
+  m_StabilizeFeet: 0
+  m_AnimatePhysics: 0
+  m_WarningMessage: 
+  m_HasTransformHierarchy: 1
+  m_AllowConstantClipSamplingOptimization: 1
+  m_KeepAnimatorStateOnDisable: 0
+  m_WriteDefaultValuesOnDisable: 0
 --- !u!1 &2072185463
 GameObject:
   m_ObjectHideFlags: 0
@@ -13442,7 +13502,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: "================\n  DEAD RECKONIG\n================"
+  m_text: "================\n  DEAD RECKONING\n================"
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
   m_sharedMaterial: {fileID: 2180264, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
