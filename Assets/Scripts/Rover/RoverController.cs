@@ -201,6 +201,9 @@ namespace Bobery.Rover
 
             // Enemies hunting the rover and its beacons.
             if (!GetComponent<EnemySpawner>()) gameObject.AddComponent<EnemySpawner>();
+
+            // Gun on the turret slot (aims at the mouse, fires on LMB).
+            if (!GetComponent<RoverTurret>()) gameObject.AddComponent<RoverTurret>();
         }
 
         void Update()

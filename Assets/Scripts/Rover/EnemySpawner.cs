@@ -48,6 +48,8 @@ namespace Bobery.Rover
         public float fireInterval = 10f;
         public float projectileSpeed = 40f;
         public Color tint = new Color(0.55f, 0.1f, 0.08f);
+        [Tooltip("Hit points of one enemy walker.")]
+        [Min(1f)] public float enemyHealth = 50f;
 
         RoverController _rover;
         RoverAutoFit _fit;
@@ -190,6 +192,8 @@ namespace Bobery.Rover
             {
                 var model = Instantiate(source, body, false);
                 model.name = "Model";
+                foreach (var t in model.GetComponentsInChildren<Transform>(true))
+                    if (t && t.name == RoverTurret.GunRootName) DestroyImmediate(t.gameObject); // the rover's own gun
                 foreach (var col in model.GetComponentsInChildren<Collider>(true)) Destroy(col);
                 foreach (var mb in model.GetComponentsInChildren<MonoBehaviour>(true)) Destroy(mb);
                 foreach (var r in model.GetComponentsInChildren<Renderer>(true))
@@ -224,6 +228,10 @@ namespace Bobery.Rover
             // The navigation map draws its own enemy icons.
             int layer = LayerMask.NameToLayer("TransparentFX"); if (layer < 0) layer = 1;
             foreach (var r in root.GetComponentsInChildren<Renderer>(true)) r.gameObject.layer = layer;
+
+            // Can be shot: 50 HP, hit sphere around the body.
+            root.AddComponent<CombatHealth>().Setup("Enemy walker", enemyHealth,
+                new Vector3(0f, size.y * 0.55f, 0f), Mathf.Max(size.x, size.z) * 0.5f, size.y * 1.35f);
 
             var enemy = root.AddComponent<EnemyRover>();
             enemy.speed = enemySpeed;

@@ -52,6 +52,8 @@ namespace Bobery.Rover
         RoverController _rover;
 
         const int TurretCount = 2;
+        /// <summary>Hit points of one turret (the rover's guns can destroy it).</summary>
+        public const float HitPoints = 100f;
         const float FootprintHalf = 1.3f;
 
         // ================================================================ placement
@@ -86,6 +88,7 @@ namespace Bobery.Rover
                 var t = go.AddComponent<OutpostTurret>();
                 t.Home = outpost;
                 t.Build();
+                go.AddComponent<CombatHealth>().Setup("Outpost turret", HitPoints, new Vector3(0f, 2.6f, 0f), 1.9f, 5.2f);
 
                 outpost.footprints.Add(new Bobery.Terrain.OutpostFootprint
                 {
