@@ -20,8 +20,17 @@ MonoBehaviour:
     rid: 3518848907339628612
   m_ActivePlatformGuid: 
   m_AdditionalPlatformBuildSettings: []
-  m_OverrideGlobalSceneList: 0
-  m_Scenes: []
+  m_OverrideGlobalSceneList: 1
+  m_Scenes:
+  - m_enabled: 1
+    m_path: Assets/Scenes/MainMenu.unity
+    m_guid: 8e58e2849c3f81a439508ab694706ac5
+  - m_enabled: 1
+    m_path: Assets/Scenes/Sebastian.unity
+    m_guid: bba627f8ebf482648afa8570bdf9f0ae
+  - m_enabled: 1
+    m_path: Assets/Scenes/RoverInterior.unity
+    m_guid: b49ad9a0c3fb95448b65f16645498a57
   m_HasScriptingDefines: 0
   m_ScriptingDefines: []
   m_PlayerSettingsYaml:
