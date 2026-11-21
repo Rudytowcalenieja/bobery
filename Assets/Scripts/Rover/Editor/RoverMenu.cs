@@ -19,7 +19,7 @@ namespace Bobery.Rover.EditorTools
     {
         const string ModelPath = "Assets/Models/rover.fbx";
         const string ControllerPath = "Assets/Models/Mover.controller";
-        const string ClipName = "Armature|ArmatureAction";
+        const string ClipName = "Armature|Armature|Armature|ArmatureAction"; // walk cycle; falls back to the longest Armature clip
         const string PhysMatPath = "Assets/Scripts/Rover/Materials/RoverWheel.physicMaterial";
         const string DriveState = "Drive";
         const int AnimationSamples = 24;
@@ -471,10 +471,13 @@ namespace Bobery.Rover.EditorTools
                 importer.SaveAndReimport();
             }
 
-            var clip = AssetDatabase.LoadAllAssetsAtPath(ModelPath)
+            var all = AssetDatabase.LoadAllAssetsAtPath(ModelPath)
                 .OfType<AnimationClip>()
                 .Where(c => !c.name.StartsWith("__preview__"))
-                .FirstOrDefault(c => Normalize(c.name) == Normalize(ClipName));
+                .ToList();
+            var clip = all.FirstOrDefault(c => Normalize(c.name) == Normalize(ClipName))
+                       // Blender exports name clips after object|action, so pick the longest armature clip if the name changed.
+                       ?? all.Where(c => c.name.StartsWith("Armature")).OrderByDescending(c => c.length).FirstOrDefault();
             if (!clip) Debug.LogWarning($"[Rover] Clip '{ClipName}' not found in {ModelPath}. Rover will not animate.");
             return clip;
         }

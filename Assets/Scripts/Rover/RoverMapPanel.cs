@@ -456,7 +456,8 @@ namespace Bobery.Rover
             int leaks = _health.Leaks.Count;
             string pct = $"{_health.Fraction * 100f:0}%";
             float drain = _health.LeakRate / _health.maxHealth * 100f;
-            _hullValue.text = leaks > 0 ? $"{pct}  -{drain:0.#}%/s  {leaks} LEAK{(leaks == 1 ? "" : "S")}" : pct;
+            _hullValue.text = leaks > 0 ? $"{pct}  -{drain:0.#}%/s  {leaks} LEAK{(leaks == 1 ? "" : "S")}"
+                           : _health.IsRegenerating ? $"{pct}  +{_health.regenPerSecond * 100f:0.#}%/s" : pct;
 
             bool hit = _health.SinceHit < 0.6f;
             float blink = 0.5f + 0.5f * Mathf.Sin(Time.time * 8f);
@@ -465,7 +466,8 @@ namespace Bobery.Rover
                                : _health.Fraction < 0.7f ? Yellow : Accent;
             _hullLabel.text = _health.IsDestroyed ? "HULL [ERR ] DESTROYED"
                             : _health.IsLow ? "HULL [WARN] CRITICAL"
-                            : leaks > 0 ? "HULL [WARN] LEAKING" : "HULL";
+                            : leaks > 0 ? "HULL [WARN] LEAKING"
+                            : _health.IsRegenerating ? "HULL [OK  ] MENDING" : "HULL";
             _hullLabel.color = _health.IsLow || hit ? Red : leaks > 0 ? Yellow : Dim;
         }
 

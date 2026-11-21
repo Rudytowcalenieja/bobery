@@ -22,6 +22,10 @@ namespace Bobery.Rover
         [Range(0f, 0.05f)] public float leakDamagePerSecond = 0.005f;
         [Tooltip("Cap (0..1 of max health per second) on the total leak drain, so piled-up leaks can't snowball.")]
         [Range(0f, 0.1f)] public float maxLeakDrainPerSecond = 0.0075f;
+        [Tooltip("Share (0..1) of max health the hull regains per second while no leak is open.")]
+        [Range(0f, 0.05f)] public float regenPerSecond = 0.005f;
+        [Tooltip("Seconds after the last hit before regeneration starts.")]
+        [Min(0f)] public float regenDelay = 5f;
 
         /// <summary>A hole in the cabin wall. Position is abstract (0..1 values) so the interior can map it onto
         /// whatever walls the cabin has; <see cref="id"/> stays stable while the leak exists.</summary>
@@ -47,6 +51,11 @@ namespace Bobery.Rover
         /// <summary>Health lost per second right now through the open leaks (capped at <see cref="maxLeakDrainPerSecond"/>).</summary>
         public float LeakRate => maxHealth * Mathf.Min(_leaks.Count * leakDamagePerSecond, maxLeakDrainPerSecond);
 
+        /// <summary>True while the hull is mending itself (no leaks, not hit lately, not full).</summary>
+        public bool IsRegenerating => !IsDestroyed && _leaks.Count == 0 && Health < maxHealth && SinceHit >= regenDelay && regenPerSecond > 0f;
+        /// <summary>Health gained per second right now (0 unless <see cref="IsRegenerating"/>).</summary>
+        public float RegenRate => IsRegenerating ? maxHealth * regenPerSecond : 0f;
+
         /// <summary>Any change: hit, repair.</summary>
         public event Action Changed;
         /// <summary>A shot landed (the new leak is passed along).</summary>
@@ -62,7 +71,13 @@ namespace Bobery.Rover
         void Update()
         {
             // Open leaks bleed the hull until they're patched (inside or outside the rover).
-            if (IsDestroyed || GameOverScreen.IsShown || _leaks.Count == 0) return;
+            if (IsDestroyed || GameOverScreen.IsShown) return;
+            if (_leaks.Count == 0)
+            {
+                // Sealed hull: slowly mends itself.
+                if (IsRegenerating) Health = Mathf.Min(maxHealth, Health + RegenRate * Time.deltaTime);
+                return;
+            }
             Health = Mathf.Max(0f, Health - LeakRate * Time.deltaTime);
             if (Health <= 0.0001f) Die("The leaks drained the hull before they could be patched.");
         }

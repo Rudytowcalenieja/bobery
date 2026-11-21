@@ -32,6 +32,10 @@ namespace Bobery.Rover
         AnimationClipPlayable _walk, _repair;
         bool _hasGraph;
         float _walkW, _repairW;
+        /// <summary>Ground speed (m/s) the walk clip shows at playback speed 1, measured from its feet.</summary>
+        float _clipGroundSpeed = 1.6f;
+        /// <summary>How fast we actually moved this frame (m/s), smoothed.</summary>
+        float _moveSpeed;
 
         public void Build(GameObject model, AnimationClip walk, AnimationClip repair, float height)
         {
@@ -86,6 +90,12 @@ namespace Bobery.Rover
             animator.applyRootMotion = false;
             animator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
 
+            if (walk)
+            {
+                float measured = MeasureGroundSpeed(body, walk);
+                if (measured > 0.05f) _clipGroundSpeed = measured;
+            }
+
             _graph = PlayableGraph.Create("RepairCrew");
             _graph.SetTimeUpdateMode(DirectorUpdateMode.GameTime);
             var output = AnimationPlayableOutput.Create(_graph, "Crew", animator);
@@ -133,6 +143,7 @@ namespace Bobery.Rover
         void Update()
         {
             float dt = Time.deltaTime;
+            Vector3 before = transform.position;
             if (Leak && Leak.Sealing) { Leak = null; Progress = 0f; if (State == Mode.Repairing) State = Mode.Idle; }
 
             switch (State)
@@ -175,6 +186,11 @@ namespace Bobery.Rover
                     break;
                 }
             }
+            if (dt > 0f)
+            {
+                Vector3 moved = transform.position - before; moved.y = 0f;
+                _moveSpeed = Mathf.Lerp(_moveSpeed, moved.magnitude / dt, 1f - Mathf.Exp(-dt * 15f));
+            }
             Animate(dt);
         }
 
@@ -193,7 +209,9 @@ namespace Bobery.Rover
             Blend(Mathf.MoveTowards(_walkW, walkTarget, dt / 0.2f), Mathf.MoveTowards(_repairW, repairTarget, dt / 0.25f));
 
             // Idle = the walk clip held on its first frame.
-            _walk.SetSpeed(State == Mode.Walking ? walkSpeed / 1.6f : 0f);
+            // Play the walk cycle exactly as fast as we move, so the planted foot doesn't skate
+            // (a minimum keeps the legs going while turning on the spot).
+            _walk.SetSpeed(State == Mode.Walking ? Mathf.Max(_moveSpeed, walkSpeed * 0.25f) / _clipGroundSpeed : 0f);
             if (State != Mode.Walking && _walkW < 0.01f) _walk.SetTime(0);
             _repair.SetSpeed(State == Mode.Repairing ? 1f : 0f);
             Loop(_walk);
@@ -229,6 +247,49 @@ namespace Bobery.Rover
         void OnDestroy()
         {
             if (_hasGraph && _graph.IsValid()) _graph.Destroy();
+        }
+
+        /// <summary>
+        /// Average ground speed of an in-place walk clip, in our own space (so the model's scale counts).
+        /// The feet are the bones that reach the floor; at each moment the planted one slides backwards
+        /// (the swinging one moves forwards), so the ground speed is the fastest backward foot motion.
+        /// </summary>
+        float MeasureGroundSpeed(GameObject body, AnimationClip clip)
+        {
+            if (clip.length <= 0f) return 0f;
+            var bones = body.GetComponentsInChildren<Transform>(true);
+            const int samples = 120;
+            var pos = new Vector3[samples + 1, bones.Length];
+            float minY = float.MaxValue, maxY = float.MinValue;
+            for (int i = 0; i <= samples; i++)
+            {
+                clip.SampleAnimation(body, clip.length * i / samples);
+                for (int k = 0; k < bones.Length; k++)
+                {
+                    pos[i, k] = transform.InverseTransformPoint(bones[k].position);
+                    minY = Mathf.Min(minY, pos[i, k].y);
+                    maxY = Mathf.Max(maxY, pos[i, k].y);
+                }
+            }
+            clip.SampleAnimation(body, 0f);
+
+            // Feet: bones that come within 3% of the character's height of the floor.
+            float reach = minY + (maxY - minY) * 0.03f;
+            var feet = new List<int>();
+            for (int k = 0; k < bones.Length; k++)
+                for (int i = 0; i <= samples; i++)
+                    if (pos[i, k].y <= reach) { feet.Add(k); break; }
+            if (feet.Count == 0) return 0f;
+
+            // We walk along our own +Z, so the planted foot is the one sliding towards -Z.
+            float back = 0f;
+            for (int i = 1; i <= samples; i++)
+            {
+                float b = 0f;
+                foreach (int k in feet) b = Mathf.Max(b, pos[i - 1, k].z - pos[i, k].z);
+                back += b;
+            }
+            return back / clip.length;
         }
 
         static Bounds WorldBounds(Renderer[] rs)

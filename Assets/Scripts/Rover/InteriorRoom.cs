@@ -463,7 +463,8 @@ namespace Bobery.Rover
             {
                 int leaks = _health.Leaks.Count;
                 float drain = _health.LeakRate / _health.maxHealth * 100f;
-                _hullText.text = $"{_health.Fraction * 100f:0}%" + (leaks > 0 ? $"  -{drain:0.#}%/s  ·  {leaks} LEAK{(leaks == 1 ? "" : "S")}" : "");
+                _hullText.text = $"{_health.Fraction * 100f:0}%" + (leaks > 0 ? $"  -{drain:0.#}%/s  ·  {leaks} LEAK{(leaks == 1 ? "" : "S")}"
+                                 : _health.IsRegenerating ? $"  +{_health.regenPerSecond * 100f:0.#}%/s" : "");
                 RoverUI.SetBar(_hullTrack, _hullFill, _health.Fraction);
                 bool hit = _health.SinceHit < 0.6f;
                 _hullFill.GetComponent<Image>().color = hit ? RoverUI.White : _health.IsLow ? RoverUI.Red : leaks > 0 ? RoverUI.Yellow : RoverUI.Accent;
