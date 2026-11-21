@@ -169,7 +169,7 @@ MonoBehaviour:
   beaconBatteryCostPercent: 10
   beaconRadius: 15
   beaconChargePerSecond: 4
-  beaconCooldown: 300
+  beaconCooldown: 180
   beaconPickUpTime: 10
   beaconHits: 5
   beaconCastTime: 3

@@ -57,8 +57,8 @@ namespace Bobery.Rover
         [Min(1f)] public float beaconRadius = 15f;
         [Tooltip("Battery charge per second while the rover is inside a zone.")]
         [Min(0f)] public float beaconChargePerSecond = 4f;
-        [Tooltip("Seconds a beacon needs after a charging session before it can charge again (300 = 5 min).")]
-        [Min(0f)] public float beaconCooldown = 300f;
+        [Tooltip("Seconds a beacon needs after a charging session before it can charge again (180 = 3 min).")]
+        [Min(0f)] public float beaconCooldown = 180f;
         [Tooltip("Seconds it takes to pick a beacon up; the rover must stay in its zone meanwhile (0 = instant).")]
         [Min(0f)] public float beaconPickUpTime = 10f;
         [Tooltip("Enemy shots a beacon survives.")]

@@ -16,8 +16,10 @@ namespace Bobery.Rover
         [Min(1f)] public float capacity = 100f;
         [Tooltip("Charge when the game starts (%).")]
         [Min(0f)] public float startingCharge = 100f;
-        [Tooltip("Charge used per second while the map is running.")]
-        [Min(0f)] public float mapDrainPerSecond = 0.2f;
+        [Tooltip("Seconds of map time on a full battery (180 = 3 min).")]
+        [Min(0f)] public float mapSecondsPerCharge = 180f;
+        /// <summary>Charge used per second while the map is running.</summary>
+        public float mapDrainPerSecond => mapSecondsPerCharge > 0f ? capacity / mapSecondsPerCharge : 0f;
         [Tooltip("Default charge used by one shot (see TryFire).")]
         [Min(0f)] public float shotCost = 5f;
 
