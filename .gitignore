@@ -17,7 +17,8 @@
 /[Ll]ibrary/
 /[Tt]emp/
 /[Oo]bj/
-/[Bb]uild/
+/[Bb]uild/*_BackUpThisFolder_ButDontShipItWithYourGame/
+/[Bb]uild/*.lnk
 /[Bb]uilds/
 /[Ll]ogs/
 /[Uu]ser[Ss]ettings/
